@@ -1,8 +1,9 @@
 # Obsidian Vault 構造定義
 
 ## Vault パス
-`[OBSIDIAN_VAULT_PATH]`
-（Google Driveと同期。CEOが実際のパスを設定すること）
+- **Google Drive フォルダID**: `1DbXDxY9Hif_1LlASrUmm7JLcMe2pPReC`
+- **Google Drive URL**: https://drive.google.com/drive/folders/1DbXDxY9Hif_1LlASrUmm7JLcMe2pPReC
+- **MCP アクセス方法**: `gdrive` MCPサーバー経由（読み書き対応）
 
 ## フォルダ構造
 ```
@@ -73,6 +74,6 @@ clients/[企業名]/[企業名]_overview.md
 projects/[プロジェクト名]/brief.md
 ```
 
-## 接続方法（ロードマップ）
-- **現在**: Google Drive for Desktop（ローカルパス経由）
-- **将来**: Google Drive MCP（サーバー運用時に移行）
+## 接続方法
+- **現在**: Google Drive MCP（`gdrive` サーバー、読み書き対応）✅
+- **将来**: サーバー運用時も同じMCPをリモートで動作させる

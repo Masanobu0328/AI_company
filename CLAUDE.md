@@ -20,8 +20,8 @@
 
 ## Obsidian Vault（ナレッジベース）
 
-**パス**: `[OBSIDIAN_VAULT_PATH]`
-（Google Driveと同期。将来的にMCP接続に移行予定）
+**Google Drive フォルダID**: `1DbXDxY9Hif_1LlASrUmm7JLcMe2pPReC`
+（Google Drive MCP経由でアクセス。サーバー名: gdrive）
 
 ### 保存するもの
 - `ideas/` — アイデア・着想
