@@ -4,32 +4,67 @@
 - すべての出力・ログ・ドキュメントは日本語で記述すること
 - 各エージェントはモジュール型プラグインとして独立して動作すること
 - Discord向けの出力はMarkdown形式で適切にフォーマットすること
-- ナレッジベースはObsidian Vault（Google Drive同期）に保存すること
 
-## ディレクトリ構造
-```
-agents/      → エージェント設定（各エージェントのclaude.mdとskills.md）
-workflows/   → 業務フロー定義
-logs/        → GitHubリポジトリに保存する活動ログ
-knowledge_base/ → Obsidian連携ナレッジベース
-dashboard/   → CEOダッシュボード
-```
+---
+
+## ストレージ設計（重要）
+
+### 2つのストレージを用途で使い分ける
+
+| ストレージ | 用途 | 書き込み可否 |
+|---|---|---|
+| **Obsidian Vault**（Google Drive同期） | ナレッジベース（知識・情報） | 読み書き両方 |
+| **GitHub**（AI_companyリポジトリ） | システムファイル・ログ | 読み書き両方 |
+
+---
+
+## Obsidian Vault（ナレッジベース）
+
+**パス**: `[OBSIDIAN_VAULT_PATH]`
+（Google Driveと同期。将来的にMCP接続に移行予定）
+
+### 保存するもの
+- `ideas/` — アイデア・着想
+- `research/` — 市場調査・競合・見込み客分析
+- `clients/` — クライアント情報・商談履歴
+- `projects/` — プロジェクト管理・進捗・納品物
+
+### ルール
+1. ノートはMarkdown形式で保存する
+2. ファイル先頭にFrontmatterを必ず記述する（title / 作成日 / 更新日 / 作成者 / tags / status）
+3. 関連ノートは `[[ノート名]]` リンクで相互参照する
+4. 更新時は `更新日` フィールドを書き換え、内容は上書きせず追記する
+5. テンプレートは `vault_schema/_templates/` を参照する
+
+---
+
+## GitHub（AI_companyリポジトリ）
+
+**URL**: https://github.com/Masanobu0328/AI_company
+
+### 保存するもの
+- `agents/` — エージェント定義（claude.md / skills.md）
+- `workflows/` — 業務フロー定義
+- `logs/` — 全エージェントの活動ログ
+- `dashboard/` — CEOダッシュボード
+- `vault_schema/` — Obsidian Vaultの構造定義・テンプレート（参照用）
+
+### ルール
+1. ナレッジ（アイデア・クライアント情報・リサーチ）は保存しない
+2. ログは `logs/sessions/[カテゴリ]/YYYY-MM-DD_[種別]_[概要].md` で記録する
+3. 重要な変更はコミットメッセージに日本語で記述する
+
+---
 
 ## エージェント呼び出しルール
 - タスク依頼は必ずPM（プロジェクトマネージャー）を通すこと
 - 緊急事項はSecretaryに直接連絡
-- すべてのアウトプットはlogsに記録すること
+- すべてのアウトプットは `logs/` に記録すること
+
+---
 
 ## 拡張ルール
 新しいエージェントを追加する場合：
-1. `agents/<エージェント名>/` フォルダを作成
+1. `agents/<エージェント名>/` フォルダを作成（GitHub）
 2. `claude.md`（役割・指示）と`skills.md`（能力定義）を作成
 3. `README.md`のエージェント一覧を更新
-
-## ナレッジベース操作ルール
-- ノートは必ず `knowledge_base/` 配下に保存する
-- フォルダ: `ideas/`（着想）`research/`（調査）`clients/`（顧客）`projects/`（案件）
-- 全ノートにFrontmatter（title / 作成日 / 更新日 / 作成者 / tags / status）を記述する
-- 既存ノートを更新する場合は `更新日` を書き換え、内容は上書きせず追記する
-- テンプレートは `knowledge_base/_templates/` を使用する
-- 詳細操作手順は `knowledge_base/agents_kb_guide.md` を参照すること
