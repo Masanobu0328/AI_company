@@ -25,3 +25,11 @@ dashboard/   → CEOダッシュボード
 1. `agents/<エージェント名>/` フォルダを作成
 2. `claude.md`（役割・指示）と`skills.md`（能力定義）を作成
 3. `README.md`のエージェント一覧を更新
+
+## ナレッジベース操作ルール
+- ノートは必ず `knowledge_base/` 配下に保存する
+- フォルダ: `ideas/`（着想）`research/`（調査）`clients/`（顧客）`projects/`（案件）
+- 全ノートにFrontmatter（title / 作成日 / 更新日 / 作成者 / tags / status）を記述する
+- 既存ノートを更新する場合は `更新日` を書き換え、内容は上書きせず追記する
+- テンプレートは `knowledge_base/_templates/` を使用する
+- 詳細操作手順は `knowledge_base/agents_kb_guide.md` を参照すること
