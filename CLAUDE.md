@@ -13,7 +13,8 @@
 
 | ストレージ | 用途 | 書き込み可否 |
 |---|---|---|
-| **Obsidian Vault**（Google Drive同期） | ナレッジベース（知識・情報） | 読み書き両方 |
+| **Obsidian Vault** `ai company/` フォルダのみ | ナレッジベース（知識・情報） | 読み書き両方 |
+| **Obsidian Vault** それ以外のフォルダ | CEOの個人知的財産 | **読み取りのみ・絶対に書き換えない** |
 | **GitHub**（AI_companyリポジトリ） | システムファイル・ログ | 読み書き両方 |
 
 ---
@@ -23,13 +24,26 @@
 **Google Drive フォルダID**: `1DbXDxY9Hif_1LlASrUmm7JLcMe2pPReC`
 （Google Drive MCP経由でアクセス。サーバー名: gdrive）
 
-### 保存するもの
-- `ideas/` — アイデア・着想
-- `research/` — 市場調査・競合・見込み客分析
-- `clients/` — クライアント情報・商談履歴
-- `projects/` — プロジェクト管理・進捗・納品物
+### ⚠️ Vault 操作の絶対ルール
 
-### ルール
+> **Vault内の `ai company/` フォルダ以外は絶対に編集・削除・上書きしない。**
+> CEOの個人ノート・知的財産が含まれており、許可なく変更することは禁止。
+
+### エージェントが操作できる場所
+```
+[Vault]/ai company/        ← ここだけ読み書き可
+    ├── ideas/
+    ├── research/
+    ├── clients/
+    └── projects/
+```
+
+### エージェントが操作できない場所
+```
+[Vault]/ai company/ 以外のすべてのフォルダ・ファイル  ← 読み取りのみ・編集禁止
+```
+
+### ノート作成ルール
 1. ノートはMarkdown形式で保存する
 2. ファイル先頭にFrontmatterを必ず記述する（title / 作成日 / 更新日 / 作成者 / tags / status）
 3. 関連ノートは `[[ノート名]]` リンクで相互参照する
