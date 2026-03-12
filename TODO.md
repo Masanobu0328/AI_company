@@ -1,41 +1,49 @@
-# 次回TODO
+# TODO
 
 最終更新: 2026-03-12
 
-## 優先順位順
+## 完了済み ✅
 
-### 1. Google Drive MCP 動作テスト
-- [ ] Claude Codeを再起動する
-- [ ] `gdrive` MCPツールが使えることを確認
-- [ ] Vault内に `ai company/` フォルダを作成
-- [ ] `ai company/ideas/` `research/` `clients/` `projects/` サブフォルダを作成
-- [ ] テストノートを1つ作成・読み取り確認
-
-### 2. Discord Bot セットアップ
-- [ ] Discord Developer Portal でBotを作成
-- [ ] Botトークンを取得
-- [ ] AI会社用サーバー（ギルド）を作成
-- [ ] チャンネル構成を決める（#secretary / #sales / #dev 等）
-- [ ] BotをサーバーにINVITE
-
-### 3. サーバーデプロイ（Discord 24時間稼働のため）
-- [ ] デプロイ先を決める（Railway / Render / VPS）
-- [ ] Google Drive MCP認証情報をサーバーに移行
-- [ ] Discord Bot をサーバー上で起動
-
-### 4. エージェント稼働テスト
-- [ ] 秘書エージェントのタスク管理テスト
-- [ ] 営業エージェントで最初の見込み客リスト作成
-- [ ] 全ワークフローの動作確認
+- [x] Google Drive MCP 接続確認
+- [x] リポジトリ設計刷新（INPUT/OUTPUT完全分離）
+  - Obsidian Vault = CEOの脳（読み取り専用）
+  - GitHub = 会社の全アウトプット
+- [x] `knowledge/` フォルダ新設（ideas/research/clients/projects/playbooks）
+- [x] `vault_schema/` 解体・テンプレートを `knowledge/_templates/` に統合
+- [x] 各エージェントを `agent.md` に統合・`skills/` フォルダ新設
+- [x] Discord Bot 作成・起動
+- [x] Claude API（Haiku）接続
+- [x] チャンネル別エージェント自動振り分け
+- [x] CEO専用アクセス制限（ユーザーID制限）
+- [x] `agent.md` をBotが起動時に自動読み込み
+- [x] 応答スタイル最適化（基本3行・詳細は要求時のみ）
 
 ---
 
-## 現在の接続状況
+## 次回TODO
+
+### 優先度：高
+- [ ] PCスリープ設定変更（Bot常時稼働のため）
+- [ ] Discordチャンネル構成の最終整備
+- [ ] Botの起動を自動化（PC起動時に自動スタート）
+
+### 優先度：中
+- [ ] VPSへの移行（Railway/Render）で24時間稼働
+- [ ] エージェント稼働テスト（営業・PM・開発の連携）
+- [ ] `knowledge/` への実績データ蓄積開始
+
+### 優先度：低
+- [ ] Discord以外の入力チャンネル検討（LINE / Slack等）
+- [ ] モデルをHaikuからSonnetに変更（本格稼働時）
+
+---
+
+## 接続状況
 | サービス | 状態 |
 |---|---|
-| GitHub (AI_company) | ✅ 接続済み |
-| Google Drive MCP | ✅ 設定済み・再起動後に使用可能 |
-| Gmail MCP | ✅ 接続済み |
-| Google Calendar MCP | ✅ 接続済み |
-| Discord | ❌ 未設定 |
-| サーバー | ❌ 未設定 |
+| GitHub (AI_company) | ✅ |
+| Google Drive MCP | ✅ 読み取り専用 |
+| Gmail MCP | ✅ |
+| Google Calendar MCP | ✅ |
+| Discord Bot | ✅ 稼働中（ローカルPC） |
+| サーバー（VPS） | ❌ 未設定 |
