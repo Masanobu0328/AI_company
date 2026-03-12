@@ -9,64 +9,49 @@
 
 ## ストレージ設計（重要）
 
-### 2つのストレージを用途で使い分ける
+### INPUTとOUTPUTを完全に分離する
 
-| ストレージ | 用途 | 書き込み可否 |
+| ストレージ | 役割 | エージェントの操作 |
 |---|---|---|
-| **Obsidian Vault** `ai company/` フォルダのみ | ナレッジベース（知識・情報） | 読み書き両方 |
-| **Obsidian Vault** それ以外のフォルダ | CEOの個人知的財産 | **読み取りのみ・絶対に書き換えない** |
-| **GitHub**（AI_companyリポジトリ） | システムファイル・ログ | 読み書き両方 |
+| **Obsidian Vault**（Google Drive） | CEOの脳・思考・知識 | **読み取りのみ・絶対に書き込まない** |
+| **GitHub**（AI_companyリポジトリ） | 会社の全アウトプット | 読み書き両方 |
 
 ---
 
-## Obsidian Vault（ナレッジベース）
+## Obsidian Vault（CEOのINPUT）
 
 **Google Drive フォルダID**: `1DbXDxY9Hif_1LlASrUmm7JLcMe2pPReC`
 （Google Drive MCP経由でアクセス。サーバー名: gdrive）
 
-### ⚠️ Vault 操作の絶対ルール
+### ⚠️ 絶対ルール
+> **Vault内のいかなるファイル・フォルダも編集・削除・作成・上書き禁止。**
+> CEOの個人ノート・思考・知的財産が含まれており、参照のみ許可。
 
-> **Vault内の `ai company/` フォルダ以外は絶対に編集・削除・上書きしない。**
-> CEOの個人ノート・知的財産が含まれており、許可なく変更することは禁止。
-
-### エージェントが操作できる場所
-```
-[Vault]/ai company/        ← ここだけ読み書き可
-    ├── ideas/
-    ├── research/
-    ├── clients/
-    └── projects/
-```
-
-### エージェントが操作できない場所
-```
-[Vault]/ai company/ 以外のすべてのフォルダ・ファイル  ← 読み取りのみ・編集禁止
-```
-
-### ノート作成ルール
-1. ノートはMarkdown形式で保存する
-2. ファイル先頭にFrontmatterを必ず記述する（title / 作成日 / 更新日 / 作成者 / tags / status）
-3. 関連ノートは `[[ノート名]]` リンクで相互参照する
-4. 更新時は `更新日` フィールドを書き換え、内容は上書きせず追記する
-5. テンプレートは `vault_schema/_templates/` を参照する
+### 用途
+- CEOの考え・アイデア・判断軸を読み取り、意思決定の参考にする
+- エージェントはVaultを「CEOの脳」として参照し、その思想に沿った行動をとる
 
 ---
 
-## GitHub（AI_companyリポジトリ）
+## GitHub（会社のOUTPUT）
 
 **URL**: https://github.com/Masanobu0328/AI_company
 
-### 保存するもの
-- `agents/` — エージェント定義（claude.md / skills.md）
-- `workflows/` — 業務フロー定義
-- `logs/` — 全エージェントの活動ログ
-- `dashboard/` — CEOダッシュボード
-- `vault_schema/` — Obsidian Vaultの構造定義・テンプレート（参照用）
+### フォルダ構成
+```
+AI_company/
+├── agents/       エージェント定義（claude.md / skills.md）
+├── workflows/    業務フロー定義
+├── knowledge/    会社が生成したナレッジ（リサーチ・クライアント情報・アイデア）
+├── logs/         全エージェントの活動ログ
+└── dashboard/    CEOダッシュボード・レポート
+```
 
 ### ルール
-1. ナレッジ（アイデア・クライアント情報・リサーチ）は保存しない
-2. ログは `logs/sessions/[カテゴリ]/YYYY-MM-DD_[種別]_[概要].md` で記録する
-3. 重要な変更はコミットメッセージに日本語で記述する
+1. 会社が生成した全アウトプットはGitHubに保存する
+2. `knowledge/` にはMarkdown形式で保存し、Frontmatterを必ず記述する（title / 作成日 / 更新日 / 作成者 / tags / status）
+3. ログは `logs/YYYY-MM-DD_[種別]_[概要].md` で記録する
+4. 重要な変更はコミットメッセージに日本語で記述する
 
 ---
 
