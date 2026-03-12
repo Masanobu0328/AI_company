@@ -15,6 +15,9 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
+# CEOのユーザーID（このユーザー以外は無視）
+CEO_ID = 1460895233213595851
+
 # エージェント定義
 AGENTS = {
     "secretary": {
@@ -51,8 +54,11 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    print(f"メッセージ受信: {message.author} -> {message.content}")
     if message.author == bot.user:
+        return
+
+    # CEO以外は無視
+    if message.author.id != CEO_ID:
         return
 
     # !ping（動作確認）
