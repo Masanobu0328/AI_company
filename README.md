@@ -6,40 +6,67 @@ CEOが指揮を執り、各AIエージェントが専門領域を担当する。
 
 ---
 
-## ストレージ設計
+## ストレージ設計（INPUT / OUTPUT の完全分離）
 
 ```
-【Obsidian Vault (Google Drive同期)】  ←  ナレッジベース
-  ideas/       アイデア・着想
-  research/    市場調査・競合・見込み客分析
-  clients/     クライアント情報・商談履歴
-  projects/    プロジェクト管理・進捗
+【Obsidian Vault（Google Drive）】  ← CEOのINPUT（脳）
+  読み取り専用。エージェントは参照のみ。書き込み禁止。
 
-【GitHub: AI_company】  ←  システム・ログ（このリポジトリ）
-  agents/      エージェント定義
-  workflows/   業務フロー
-  logs/        活動ログ
-  dashboard/   CEOダッシュボード
-  vault_schema/ Vaultの構造定義・テンプレート
+【GitHub: AI_company】  ← 会社のOUTPUT（このリポジトリ）
+  agents/       エージェント定義・スキルライブラリ
+  workflows/    業務フロー定義
+  knowledge/    会社が生成したナレッジ（リサーチ・クライアント・アイデア・プレイブック）
+  logs/         全エージェントの活動ログ
+  dashboard/    CEOダッシュボード・レポート
 ```
 
 ---
 
 ## このリポジトリの構造
-- `agents/` — 各AIエージェントの設定と能力定義
-- `workflows/` — 業務フロー定義
-- `logs/` — 全エージェントの活動ログ
-- `dashboard/` — CEOダッシュボード
-- `vault_schema/` — Obsidian Vaultの構造定義・テンプレート（参照用）
+
+### `agents/`
+各AIエージェントの定義とスキルライブラリ。
+
+```
+agents/[エージェント名]/
+  ├── agent.md      役割・責任範囲・スキル概要・行動指針
+  └── skills/       実行可能スキルの蓄積（仕事をするたびに増える）
+```
+
+### `workflows/`
+エージェント間の業務フロー定義。
+
+### `knowledge/`
+会社が生成・蓄積したナレッジ。
+
+```
+knowledge/
+  ├── _templates/   ノート作成用テンプレート
+  ├── ideas/        アイデア・着想
+  ├── research/     市場調査・競合・業界分析
+  ├── clients/      クライアント情報・商談履歴
+  ├── projects/     プロジェクト管理・進捗
+  └── playbooks/    実績から生まれたノウハウ・再現可能な型
+```
+
+### `logs/`
+全エージェントの活動ログ。
+
+### `dashboard/`
+CEOダッシュボード・定期レポート。
+
+---
 
 ## エージェント一覧
 | エージェント | 役割 |
 |---|---|
-| secretary | CEO秘書・タスク管理 |
-| pm | プロジェクトマネージャー |
-| sales | 営業・クライアント獲得 |
+| secretary | CEO秘書・タスク管理・情報整理 |
+| pm | プロジェクトマネージャー・全体調整 |
+| sales | 営業・クライアント開拓 |
 | marketing | マーケティング・リード獲得 |
 | development | 開発・Web制作 |
+
+---
 
 ## 言語ポリシー
 すべてのドキュメント、エージェント出力、ログは日本語で記述すること。
