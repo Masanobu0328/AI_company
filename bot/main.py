@@ -18,38 +18,71 @@ claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 # CEOのユーザーID（このユーザー以外は無視）
 CEO_ID = 1460895233213595851
 
-# エージェント定義
-AGENTS = {
-    "secretary": {
-        "name": "秘書エージェント",
-        "prompt": "あなたはAI会社のCEO専属秘書です。タスク管理・情報整理・会議要約を担当します。簡潔で的確な日本語で応答してください。"
-    },
-    "sales": {
-        "name": "営業エージェント",
-        "prompt": "あなたはAI会社の営業エージェントです。クライアント開拓・Webサイト分析・アウトリーチを担当します。簡潔で的確な日本語で応答してください。"
-    },
-    "pm": {
-        "name": "PMエージェント",
-        "prompt": "あなたはAI会社のプロジェクトマネージャーです。プロジェクト管理・タスク割り当て・進捗追跡を担当します。簡潔で的確な日本語で応答してください。"
-    },
-    "dev": {
-        "name": "開発エージェント",
-        "prompt": "あなたはAI会社の開発エージェントです。Webサイト制作・モックアップ生成・コーディングを担当します。簡潔で的確な日本語で応答してください。"
-    },
-    "marketing": {
-        "name": "マーケティングエージェント",
-        "prompt": "あなたはAI会社のマーケティングエージェントです。SNSコンテンツ制作・ブランド管理・リード獲得を担当します。簡潔で的確な日本語で応答してください。"
-    },
+# agent.mdを読み込む関数
+def load_agent_prompt(agent_key):
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    agent_file = os.path.join(base_dir, "agents", agent_key, "agent.md")
+    if os.path.exists(agent_file):
+        with open(agent_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return None
+
+# エージェント定義（起動時にagent.mdを読み込む）
+AGENT_KEYS = {
+    "secretary": "秘書エージェント",
+    "sales": "営業エージェント",
+    "pm": "PMエージェント",
+    "dev": "開発エージェント",
+    "development": "開発エージェント",
+    "marketing": "マーケティングエージェント",
 }
+
+AGENTS = {}
+
+def load_all_agents():
+    key_to_folder = {
+        "secretary": "secretary",
+        "sales": "sales",
+        "pm": "pm",
+        "dev": "development",
+        "development": "development",
+        "marketing": "marketing",
+    }
+    for key, folder in key_to_folder.items():
+        prompt = load_agent_prompt(folder)
+        if prompt:
+            AGENTS[key] = {
+                "name": AGENT_KEYS[key],
+                "prompt": f"""あなたは以下の定義に従って動作するAIエージェントです。必ず日本語で応答してください。
+
+## 応答スタイルの絶対ルール
+- 基本は3行以内で端的に答える
+- 「詳しく」「教えて」「説明して」「どうすれば」「提案して」などの言葉がある場合のみ詳しく答える
+- 挨拶・確認・簡単な質問は1〜2文で返す
+- 余計な前置き・まとめ・箇条書きの羅列は不要
+- 本当に必要な情報だけを伝える
+
+## エージェント定義
+{prompt}"""
+            }
+            print(f"読み込み完了: {key} ({folder}/agent.md)")
+        else:
+            # agent.mdがない場合はフォールバック
+            AGENTS[key] = {
+                "name": AGENT_KEYS[key],
+                "prompt": f"あなたはAI会社の{AGENT_KEYS[key]}です。簡潔で的確な日本語で応答してください。"
+            }
+            print(f"agent.md未検出、デフォルト使用: {key}")
 
 def get_agent_by_channel(channel_name):
     for key in AGENTS:
         if key in channel_name:
             return key
-    return "secretary"  # デフォルトは秘書
+    return "secretary"
 
 @bot.event
 async def on_ready():
+    load_all_agents()
     print(f"Bot起動完了: {bot.user}")
 
 @bot.event
@@ -72,7 +105,6 @@ async def on_message(message):
     is_agent_channel = any(key in channel_name for key in AGENTS)
 
     if is_mention or is_agent_channel:
-        # メンション部分を除いたテキストを取得（<@ID>と<@!ID>両方に対応）
         content = message.content
         content = content.replace(f"<@{bot.user.id}>", "")
         content = content.replace(f"<@!{bot.user.id}>", "")
@@ -81,7 +113,6 @@ async def on_message(message):
             await message.channel.send("何かご用件はありますか？")
             return
 
-        # エージェントを選択
         agent_key = get_agent_by_channel(channel_name)
         agent = AGENTS[agent_key]
 
