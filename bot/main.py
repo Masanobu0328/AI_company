@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import unicodedata
 import discord
 from discord.ext import commands, tasks
@@ -98,6 +99,7 @@ CEO_ID = 1460895233213595851
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 conversation_history = {}
+processed_message_ids = set()  # 重複返答防止用
 
 LEARNING_TRIGGERS = [
     "覚えて", "学習して", "学習:", "メモして", "覚えといて", "次からは",
@@ -134,6 +136,7 @@ KEY_TO_FOLDER = {
 
 def build_prompt(key, base, learning, is_secretary=False, is_pm=False, is_marketing=False, is_sales=False, is_dev=False):
     """エージェントのシステムプロンプトを生成する"""
+    agent_name = AGENT_KEYS.get(key, key)
     tone = (
         "丁寧な敬語で話すこと。" if is_secretary
         else "敬語は使わない。カジュアルな口調で話す。「〜だ」「〜だね」「〜しよう」「〜かな」など自然な話し言葉で。"
@@ -192,7 +195,8 @@ def build_prompt(key, base, learning, is_secretary=False, is_pm=False, is_market
 - **スタンス**: 誠実で謙虚、エンジニアをリスペクトする。テクノロジーを「魔法」のように信じ、個人の力を最大化させる。
 """ if is_dev else ""
 
-    return f"""あなたはAI会社のエージェントです。必ず日本語で応答してください。
+    return f"""あなたは「{agent_name}」です。必ず日本語で応答してください。
+会話に他のエージェント名が出ても、あなたは常に「{agent_name}」として返答してください。絶対に他人になりきらない。
 {secretary_rule}
 {pm_rule}
 {marketing_rule}
@@ -487,6 +491,65 @@ def save_excel_locally(path, content, timestamp):
 
 PROGRESS_KEYWORDS = ["進捗", "状況", "どうなって", "どこまで", "何してる", "何やってる", "報告して", "確認して"]
 
+# ── 構造化ステート管理（state.json）──
+
+STATE_PATH = os.path.join(BASE_DIR, "knowledge", "shared", "state.json")
+
+def load_state():
+    if os.path.exists(STATE_PATH):
+        with open(STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"decisions": [], "tasks": {}, "blockers": []}
+
+def save_state(state):
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+    with open(STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+def state_add_decision(text, agent_key):
+    state = load_state()
+    state["decisions"].append({
+        "text": text, "by": agent_key,
+        "ts": datetime.utcnow().isoformat()
+    })
+    state["decisions"] = state["decisions"][-20:]  # 直近20件
+    save_state(state)
+
+def state_update_task(agent_key, status, detail):
+    state = load_state()
+    state["tasks"][agent_key] = {
+        "status": status, "detail": detail,
+        "ts": datetime.utcnow().isoformat()
+    }
+    save_state(state)
+
+def state_add_blocker(agent_key, text):
+    state = load_state()
+    state["blockers"].append({
+        "agent": agent_key, "text": text,
+        "ts": datetime.utcnow().isoformat()
+    })
+    state["blockers"] = state["blockers"][-10:]
+    save_state(state)
+
+def get_state_summary():
+    """CEOや秘書が読むための現状サマリーを生成"""
+    state = load_state()
+    lines = []
+    if state.get("decisions"):
+        lines.append("【決定事項】")
+        for d in state["decisions"][-5:]:
+            lines.append(f"  {d['by']}: {d['text']}")
+    if state.get("tasks"):
+        lines.append("【タスク状況】")
+        for agent, t in state["tasks"].items():
+            lines.append(f"  {agent}: [{t['status']}] {t['detail']}")
+    if state.get("blockers"):
+        lines.append("【ブロッカー】")
+        for b in state["blockers"]:
+            lines.append(f"  {b['agent']}: {b['text']}")
+    return "\n".join(lines) if lines else "記録なし"
+
 
 def enrich_content_with_files(content, agent_key):
     """エージェントのメモリに記載されたファイルパスを検出し、内容をメッセージに自動付加する"""
@@ -539,8 +602,11 @@ async def collect_progress_report():
         except Exception as e:
             reports[agent_name] = f"（取得エラー: {e}）"
 
-    # 秘書が要約してCEOへの報告文を作成
+    # state.jsonのサマリーも追加
+    state_summary = get_state_summary()
     report_text = "\n".join(f"【{name}】{text}" for name, text in reports.items())
+    if state_summary and state_summary != "記録なし":
+        report_text = state_summary + "\n\n" + report_text
     try:
         secretary = AGENTS.get("secretary")
         resp = claude.messages.create(
@@ -817,15 +883,21 @@ async def handle_all_hands(message, content):
         agent = AGENTS[agent_key]
         async with message.channel.typing():
             try:
+                # 全体チャット: 会話履歴なし・短文強制・Haiku固定
+                system_allhands = (
+                    agent["prompt"]
+                    + "\n\n## 全体チャンネルのルール\n"
+                    + "返答は3行以内。要点と次のアクションのみ。前置き・まとめ・挨拶不要。"
+                )
                 resp = claude.messages.create(
-                    model=get_model(content),
-                    max_tokens=512,
-                    system=agent["prompt"],
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=200,
+                    system=system_allhands,
                     messages=[{"role": "user", "content": content}],
                 )
                 raw_reply = resp.content[0].text
 
-                # [SAVE:]を抽出して保存
+                # [SAVE:] / [NEXT:] / [DONE:] を抽出
                 for s in re.findall(r'\[SAVE:\s*(.+?)\]', raw_reply, re.DOTALL):
                     await append_agent_memory(agent_key, s.strip(), ts)
 
@@ -837,8 +909,12 @@ async def handle_all_hands(message, content):
                 else:
                     await message.channel.send(f"{agent['name']}\n{clean_reply}")
 
-                # 返答内容を全エージェントのメモリに即時記録
-                entry = f"[全体会議/{agent['name']}] {clean_reply[:150]}"
+                # [NEXT:] / [DONE:] パイプライン処理
+                if message.guild and any(m in raw_reply for m in ('[NEXT:', '[DONE:')):
+                    await handle_agent_messaging(message.guild, agent_key, raw_reply)
+
+                # 返答を全エージェントのメモリに記録（structuredで保存）
+                entry = f"[全体会議/{agent['name']}] {clean_reply[:120]}"
                 for other_key in all_agent_keys:
                     if other_key != agent_key:
                         await append_agent_memory(other_key, entry, ts)
@@ -949,6 +1025,13 @@ async def on_message(message):
         await message.channel.send("森岡さんが投稿案を作成中...")
         await run_sns_drafts()
         return
+
+    # 重複処理防止
+    if message.id in processed_message_ids:
+        return
+    processed_message_ids.add(message.id)
+    if len(processed_message_ids) > 500:  # メモリ肥大防止
+        processed_message_ids.clear()
 
     channel_name = message.channel.name if hasattr(message.channel, "name") else ""
     content = message.content.strip()
