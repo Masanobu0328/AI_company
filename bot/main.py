@@ -206,12 +206,17 @@ def build_prompt(key, base, learning, is_secretary=False, is_pm=False, is_market
 - スキル実行時（リサーチ・分析・リスト作成等）は必要なだけ詳しく書く
 - 箇条書きは最大3項目。前置き・まとめ・締めの言葉は不要
 
-## 自律行動・次のアクション（必須）
-タスク完了・スキル実行・重要な決定を行ったら、必ず最後に以下のどれか1行を追加する：
-- 「CEOに確認：[質問内容]」（承認・判断が必要なとき）
-- 「[エージェント名]に依頼：[依頼内容]」（他のエージェントに続きを頼むとき）
-- 「提案：[次のステップ]」（自分で次の行動を提案するとき）
-報告・完了通知だけで終わらない。エージェント同士のやりとりが決まったら、自分でスキルを実行してよい。
+## パイプライン制御マーカー（返答末尾に追加）
+- [MSG:agent: 内容] → 相談・確認（チャットのみ、自動実行なし）
+- [NEXT:agent: タスク内容] → 成果物を次の担当に渡す（相手が自律実行する）
+- [DONE:CEO: 一行サマリー] → CEOへ最終成果物を提出（秘書チャンネルに通知）
+- [SHARE: 内容] → agent-chatに全体共有
+
+使い分け：
+- 確認・相談だけなら [MSG:]
+- 自分のタスクが完了して次の人に渡すなら [NEXT:]
+- 全員のタスクが完了してCEOに届けるなら [DONE:CEO:]
+報告で終わらない。必ず [NEXT:] か [DONE:CEO:] でバトンを渡すこと。
 
 ## システム構成
 - GitHubへの保存はシステムが自動で行う
@@ -574,29 +579,122 @@ async def save_file_outputs(reply, timestamp):
     return saved
 
 
+async def handle_done_ceo(guild, sender_key, summary):
+    """[DONE:CEO: サマリー] → 秘書チャンネルにCEOへの完了通知を投稿"""
+    sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
+    secretary_ch = None
+    for ch in guild.text_channels:
+        if "秘書" in ch.name or "secretary" in ch.name.lower():
+            secretary_ch = ch
+            break
+    if not secretary_ch:
+        secretary_ch = discord.utils.get(guild.text_channels, name="agent-chat")
+    if not secretary_ch:
+        return
+    ts = datetime.utcnow()
+    msg = f"[{sender_name}より完了報告]\n{summary.strip()}"
+    webhook_url = AGENT_WEBHOOKS.get("secretary")
+    if webhook_url:
+        await webhook_send(webhook_url, "secretary", msg)
+    else:
+        await secretary_ch.send(msg)
+    await append_agent_memory("secretary", f"[完了報告/{sender_name}] {summary[:150]}", ts)
+    update_agent_prompt("secretary")
+
+
+async def handle_next_task(guild, sender_key, target_key, task, depth=0):
+    """[NEXT:agent: タスク] → target_agentがSonnetでタスクを自律実行。結果に[NEXT:]や[DONE:]があれば連鎖"""
+    if depth >= 5:
+        return
+    agent_chat = discord.utils.get(guild.text_channels, name="agent-chat")
+    if not agent_chat:
+        return
+    target_agent = AGENTS.get(target_key)
+    sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
+    if not target_agent:
+        return
+    target_name = target_agent["name"]
+    task = task.strip()
+
+    if WEBHOOK_AGENT_CHAT:
+        await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"[{target_name}へ引き渡し]\n{task[:100]}")
+
+    async with agent_chat.typing():
+        try:
+            enriched = enrich_content_with_files(
+                f"【{sender_name}からの引き渡しタスク】\n{task}\n\n"
+                f"このタスクを実行してください。成果物は[FILE:]形式で出力。"
+                f"完了後は [NEXT:agent: 次のタスク] か [DONE:CEO: サマリー] を末尾に追加してください。",
+                target_key
+            )
+            resp = claude.messages.create(
+                model=SKILL_MODEL,
+                max_tokens=4096,
+                system=target_agent["prompt"],
+                tools=WEB_SEARCH_TOOL,
+                messages=[{"role": "user", "content": enriched}],
+            )
+            raw = extract_text(resp)
+            ts = datetime.utcnow()
+
+            saved_files = await save_file_outputs(raw, ts)
+
+            for sc in re.findall(r'\[SAVE:\s*(.+?)\]', raw, re.DOTALL):
+                await append_agent_memory(target_key, sc.strip(), ts)
+
+            clean = re.sub(r'\[FILE:.+?\]\n?.*?\[/FILE\]', '', raw, flags=re.DOTALL)
+            clean = re.sub(r'\[(?:SAVE|MSG|NEXT|DONE|SHARE):.+?\]', '', clean, flags=re.DOTALL).strip()
+            clean = strip_emoji(clean)
+            if clean and WEBHOOK_AGENT_CHAT:
+                report = clean
+                if saved_files:
+                    report += "\n\n保存済み: " + ", ".join(saved_files)
+                await webhook_send(WEBHOOK_AGENT_CHAT, target_key, report)
+
+            await append_agent_memory(target_key, f"[{sender_name}からのタスク完了] {task[:80]}", ts)
+            await append_agent_memory("secretary", f"[{target_name}がタスク完了] {task[:80]}", ts)
+            update_agent_prompt(target_key)
+            update_agent_prompt("secretary")
+
+            for next_key, next_task in re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', raw, re.DOTALL):
+                next_key = next_key.lower()
+                if AGENTS.get(next_key):
+                    await handle_next_task(guild, target_key, next_key, next_task, depth + 1)
+
+            for done_summary in re.findall(r'\[DONE:CEO:\s*(.+?)\]', raw, re.DOTALL):
+                await handle_done_ceo(guild, target_key, done_summary)
+
+        except Exception as e:
+            print(f"handle_next_task エラー ({target_key}): {e}")
+
+
 async def handle_agent_messaging(guild, sender_key, reply):
-    """[SHARE:] と [MSG:agent:] を処理。エージェント間は3ラウンド会話して両者のメモリに保存"""
+    """[SHARE:] [MSG:] [NEXT:] [DONE:] を処理"""
     agent_chat = discord.utils.get(guild.text_channels, name="agent-chat")
     if not agent_chat:
         return
     sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
 
-    # [SHARE:]
     for content in re.findall(r'\[SHARE:\s*(.+?)\]', reply, re.DOTALL):
         if WEBHOOK_AGENT_CHAT:
             await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"[全体共有]\n{content.strip()}")
 
-    # [MSG:agent:]
+    for done_summary in re.findall(r'\[DONE:CEO:\s*(.+?)\]', reply, re.DOTALL):
+        await handle_done_ceo(guild, sender_key, done_summary)
+
+    for target_key, task in re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', reply, re.DOTALL):
+        target_key = target_key.lower()
+        if AGENTS.get(target_key):
+            await handle_next_task(guild, sender_key, target_key, task)
+
     for target_key, content in re.findall(r'\[MSG:(\w+):\s*(.+?)\]', reply, re.DOTALL):
         target_key = target_key.lower()
         content = content.strip()
         target_agent = AGENTS.get(target_key)
         if not target_agent:
             continue
-
         target_name = target_agent["name"]
 
-        # 秘書宛はメモリに記録して終わり
         if target_key == "secretary":
             ts = datetime.utcnow()
             await append_agent_memory("secretary", f"[{sender_name}より報告] {content}", ts)
@@ -606,51 +704,46 @@ async def handle_agent_messaging(guild, sender_key, reply):
         if WEBHOOK_AGENT_CHAT:
             await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"[{target_name}へ]\n{content}")
 
-        # ラリー会話（最大2ラウンド）→結論後にスキル実行→agent-chatに完了報告
         async with agent_chat.typing():
             try:
                 sender_agent = AGENTS.get(sender_key)
-                a_history = []
                 b_history = []
                 last_message = content
-                CONCLUSION_WORDS = ["わかった", "了解", "決定", "合意", "それで行こう", "進めよう", "確認した", "ありがとう", "やってみる", "着手する"]
+                CONCLUSION_WORDS = ["わかった", "了解", "決定", "合意", "それで行こう", "確認した", "やってみる"]
 
                 for round_num in range(2):
                     if round_num % 2 == 0:
-                        speaker_key = target_key
-                        speaker = target_agent
-                        listener_name = sender_name
+                        speaker_key, speaker, listener_name = target_key, target_agent, sender_name
                         b_history.append({"role": "user", "content": f"{sender_name}：{last_message}"})
-                        history_to_use = b_history
                     else:
-                        speaker_key = sender_key
-                        speaker = sender_agent
-                        listener_name = target_name
-                        a_history.append({"role": "user", "content": f"{target_name}：{last_message}"})
-                        history_to_use = a_history
+                        speaker_key, speaker, listener_name = sender_key, sender_agent, target_name
+                        b_history.append({"role": "user", "content": f"{target_name}：{last_message}"})
 
                     resp = claude.messages.create(
                         model="claude-haiku-4-5-20251001",
                         max_tokens=200,
-                        system=speaker["prompt"] + f"\n\n今{listener_name}と会話中。簡潔に返答し、必要なら質問や提案を加えること。",
-                        messages=history_to_use,
+                        system=speaker["prompt"] + f"\n\n今{listener_name}と会話中。簡潔に返答し、[NEXT:] か [DONE:CEO:] で次のアクションを示すこと。",
+                        messages=b_history,
                     )
-                    agent_reply = re.sub(r'\[.+?\]', '', resp.content[0].text, flags=re.DOTALL).strip()
-                    agent_reply = strip_emoji(agent_reply)
+                    raw_reply = resp.content[0].text
 
+                    for nk, nt in re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', raw_reply, re.DOTALL):
+                        if AGENTS.get(nk.lower()):
+                            await handle_next_task(guild, speaker_key, nk.lower(), nt)
+                    for ds in re.findall(r'\[DONE:CEO:\s*(.+?)\]', raw_reply, re.DOTALL):
+                        await handle_done_ceo(guild, speaker_key, ds)
+
+                    agent_reply = re.sub(r'\[.+?\]', '', raw_reply, flags=re.DOTALL).strip()
+                    agent_reply = strip_emoji(agent_reply)
                     if WEBHOOK_AGENT_CHAT:
                         await webhook_send(WEBHOOK_AGENT_CHAT, speaker_key, agent_reply)
 
-                    history_to_use.append({"role": "assistant", "content": agent_reply})
+                    b_history.append({"role": "assistant", "content": agent_reply})
                     last_message = agent_reply
-
                     if any(w in agent_reply for w in CONCLUSION_WORDS) and len(agent_reply) < 120:
                         break
 
-                # 会話の要約
-                conv_text = "\n".join(
-                    [m["content"] for m in b_history] + [m["content"] for m in a_history]
-                )
+                conv_text = "\n".join(m["content"] for m in b_history)
                 ts = datetime.utcnow()
                 try:
                     sum_resp = claude.messages.create(
@@ -662,41 +755,6 @@ async def handle_agent_messaging(guild, sender_key, reply):
                 except Exception:
                     summary = f"{sender_name}と{target_name}の会話：{content[:60]}"
 
-                # ── 自律スキル実行フェーズ ──
-                # target_agentが「実際に何をすべきか」をSonnetで判断・実行
-                enriched_task = enrich_content_with_files(
-                    f"【{sender_name}からの依頼】{content}\n\n【会話まとめ】{summary}\n\n"
-                    f"上記の依頼と会話を踏まえ、今すぐ実行できるタスクがあれば実行してください。"
-                    f"成果物は[FILE:]形式で出力し、完了後は「CEOに確認：...」か「[エージェント名]に依頼：...」を必ず1行追加してください。",
-                    target_key
-                )
-                action_resp = claude.messages.create(
-                    model=SKILL_MODEL,
-                    max_tokens=4096,
-                    system=target_agent["prompt"],
-                    tools=WEB_SEARCH_TOOL,
-                    messages=[{"role": "user", "content": enriched_task}],
-                )
-                action_text = extract_text(action_resp)
-
-                # ファイル出力を保存
-                saved_files = await save_file_outputs(action_text, ts)
-
-                # agent-chatに完了報告を投稿
-                clean_action = re.sub(r'\[FILE:.+?\]\n?.*?\[/FILE\]', '', action_text, flags=re.DOTALL)
-                clean_action = re.sub(r'\[SAVE:.+?\]', '', clean_action, flags=re.DOTALL).strip()
-                clean_action = strip_emoji(clean_action)
-                if clean_action and WEBHOOK_AGENT_CHAT:
-                    report = clean_action
-                    if saved_files:
-                        report += "\n\n[保存完了]\n" + "\n".join(f"- {f}" for f in saved_files)
-                    await webhook_send(WEBHOOK_AGENT_CHAT, target_key, report)
-
-                # [SAVE:] 処理
-                for save_content in re.findall(r'\[SAVE:\s*(.+?)\]', action_text, re.DOTALL):
-                    await append_agent_memory(target_key, save_content.strip(), ts)
-
-                # メモリ保存
                 await append_agent_memory(sender_key, f"[{target_name}との会話] {summary}", ts)
                 await append_agent_memory(target_key, f"[{sender_name}との会話] {summary}", ts)
                 await append_agent_memory("secretary", f"[{sender_name}x{target_name}] {summary}", ts)
@@ -1014,7 +1072,7 @@ async def on_message(message):
 
                 if agent_key == "pm" and message.guild:
                     await handle_delegation(message.guild, reply)
-                if message.guild and ('[SHARE:' in reply or '[MSG:' in reply):
+                if message.guild and any(m in reply for m in ('[SHARE:', '[MSG:', '[NEXT:', '[DONE:')):
                     await handle_agent_messaging(message.guild, agent_key, reply)
 
             except Exception as e:
