@@ -214,10 +214,11 @@ def build_prompt(key, base, learning, is_secretary=False, is_pm=False, is_market
 - [MSG:agent: 内容] → 相談・確認（チャットのみ、自動実行なし）
 - [NEXT:agent: タスク内容] → 成果物を次の担当に渡す（相手が自律実行する）
 - [DONE:CEO: 一行サマリー] → CEOへ最終成果物を提出（秘書チャンネルに通知）
-- [SHARE: 内容] → agent-chatに全体共有
+- [SHARE: 内容] → 全体周知 + 関係エージェントが自動で動く（内容でルーティング）
 
 使い分け：
 - 確認・相談だけなら [MSG:]
+- 特定の相手に実際に動かせたいなら [NEXT:agent:] を使う（[SHARE:]では特定相手を確実に動かせない）
 - 自分のタスクが完了して次の人に渡すなら [NEXT:]
 - 全員のタスクが完了してCEOに届けるなら [DONE:CEO:]
 報告で終わらない。必ず [NEXT:] か [DONE:CEO:] でバトンを渡すこと。
@@ -742,8 +743,14 @@ async def handle_agent_messaging(guild, sender_key, reply):
     sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
 
     for content in re.findall(r'\[SHARE:\s*(.+?)\]', reply, re.DOTALL):
+        content = content.strip()
         if WEBHOOK_AGENT_CHAT:
-            await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"[全体共有]\n{content.strip()}")
+            await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"[全体共有]\n{content}")
+        # [SHARE:] の内容を関係エージェントにルーティングして自律実行
+        targets = route_message_to_agents(content)
+        for target_key in targets:
+            if target_key != sender_key and target_key != "secretary":
+                await handle_next_task(guild, sender_key, target_key, content)
 
     for done_summary in re.findall(r'\[DONE:CEO:\s*(.+?)\]', reply, re.DOTALL):
         await handle_done_ceo(guild, sender_key, done_summary)
