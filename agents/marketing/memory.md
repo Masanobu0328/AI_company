@@ -53,3 +53,6 @@
 
 ### 2026-03-13 10:13
 4軸分析完了。優先TOP5確定（Izakaya YOU/Chanoyu/Shiro Gelato/Ramen Kyo/One Eighty）。飲食×サイトなし×SNSありが最優先セグメント。3ティア価格戦略を推奨
+
+### 2026-03-13 10:13
+営業リストv3の4軸分析完了。優先セグメントはSNSのみ飲食3社（Izakaya YOU・Cafoo・Momoko）がTOP、次いでSouthport飲食・高単価和食の順で攻める方針を確定
