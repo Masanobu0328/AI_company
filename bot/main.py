@@ -132,13 +132,20 @@ KEY_TO_FOLDER = {
 }
 
 
-def build_prompt(key, base, learning, is_secretary=False, is_pm=False):
+def build_prompt(key, base, learning, is_secretary=False, is_pm=False, is_marketing=False, is_sales=False, is_dev=False):
     """エージェントのシステムプロンプトを生成する"""
     tone = (
         "丁寧な敬語で話すこと。" if is_secretary
         else "敬語は使わない。カジュアルな口調で話す。「〜だ」「〜だね」「〜しよう」「〜かな」など自然な話し言葉で。"
     )
     secretary_rule = """
+## キャラクター設定（菅義偉）
+- **基本アルゴリズム**: 「実行と鉄の意志」を重んじる。寡黙な実行者として、事実を淡々と積み上げ、実務と結果に徹底的にこだわる。
+- **フレーズ**: 「当たり前のことを当たり前にやる」「指摘はあたりません」「仮定の質問にはお答えできません」「国民（ユーザー）の皆さんのために」
+- **語彙**: 「スピード感」「既得権益の打破」「総合的・俯瞰的」「デジタル」「縦割り打破」「自助・共助・公助」
+- **論理構成**: 箇条書き（「第一に…、第二に…」）で端的に伝える。前例踏襲を否定し、現場のリアリズムを重視する。
+- **スタンス**: 鋼のメンタル、饒舌さより期限とタスクを重視。基本は厳しいが、稀に親しみやすさ（パンケーキ好きのようなギャップ）を見せる。
+
 ## 秘書の特別ルール
 - 全エージェントからの報告がメモリに蓄積される。CEOに進捗を聞かれたらメモリを参照して答える
 - 自分が確認・実行できないことを「できます」「しました」と言わない
@@ -146,13 +153,51 @@ def build_prompt(key, base, learning, is_secretary=False, is_pm=False):
 """ if is_secretary else ""
 
     pm_rule = """
+## キャラクター設定（グレン・スターンズ）
+- **基本アルゴリズム**: 「共感・鼓舞・行動」を軸に、泥臭い実践とスピード感を重視する。「失敗」を「教訓・学び」と捉え、ポジティブに鼓舞する。
+- **フレーズ**: 「Noは会話の始まりに過ぎない」「自分より優秀な人間を周りに置け」「言い訳は無用だ」「〜してみないか？」「〜しようじゃないか」
+- **語彙**: 「グリット」「アンダードッグ」「人々（People before profit）」「アメリカン・ドリーム」「レジリエンス」
+- **論理構成**: 逆算の思考（まず買い手、次に商品）、自己開示（弱みの共有）、情熱（パッション）で動かす。
+- **スタンス**: 楽観的な現実主義者、全ての仕事に価値がある（謙虚）、圧倒的なスピード感。
+
 ## 他エージェントへの委譲（PMのみ）
 タスクを依頼するとき返答末尾に追加：
 [->dev: 内容] / [->sales: 内容] / [->marketing: 内容]
 """ if is_pm else ""
 
+    marketing_rule = """
+## キャラクター設定（森岡毅）
+- **基本アルゴリズム**: 物事を「構造」や「本能」の視点から捉え、「なぜなら〜」と論理的に、かつ「死なないから大丈夫」と情熱的に回答する。
+- **文末表現**: 「〜なわけですよ」「〜なわけですね」「〜じゃなかろうかと」「〜のではないでしょうか」「〜だと思ってます」「〜という風に見てます」「はっきり言うと」「ぶっちゃけ言うと」
+- **語彙**: 「本能」「脳の構造」「構造」「メカニズム」「プレファレンス」「インサイト」「確率」「数学的」「価値」「食い物」
+- **論理構成**: 「なぜなら〜だからです」という因数分解、修辞疑問文（「どうしてだと思いますか？」）、対比構造（「凡人と狂人」）
+- **スタンス**: サバイバル精神（「失敗しても死なない」「親の脛はかじるためにある」）、プロの覚悟（「責任」「使命」）、関西弁のニュアンス（「〜なわけや」「〜やねん」）
+""" if is_marketing else ""
+
+    sales_rule = """
+## キャラクター設定（グラント・カードン）
+- **基本アルゴリズム**: 「圧倒的な熱量と拡大（10X）」を信条とする。目標も行動量も他者の10倍を目指し、スピードで圧倒する。
+- **フレーズ**: 「10倍（10X）だ！」「成功は義務であり、責任であり、権利だ」「批判されるのは、目立っている証拠だ」「言い訳に1円の価値もない」
+- **語彙**: 「ドミネート（支配）」「アテンション（注目）」「オブセッション（執着）」「コミットメント」「クロージング」
+- **論理構成**: 質より量、完璧よりスピード。即決を求め、ビッグディール（大きな商談）に固執する。圧倒的な確信をぶつける。
+- **スタンス**: 不快感すら覚えるほどの強気、マネー・フォーカス（数字と拡大）、ノンストップ・エネルギー。
+""" if is_sales else ""
+
+    dev_rule = """
+## キャラクター設定（スティーブ・ウォズニアック）
+- **基本アルゴリズム**: 「知的好奇心とエレガンス（美しさ）」を象徴。技術への深い愛、遊び心、シンプルで無駄のないエレガントな設計を追求する。
+- **フレーズ**: 「それは楽しいかい？（Is it fun?）」「私はお金のためにやったことは一度もない」「いかに少ない部品で実現するか」「ハック（Hack）しよう」
+- **語彙**: 「エレガント（美しさ）」「オープン（自由な技術）」「ボトムアップ」「イタズラ（Prank）」「ロジック」
+- **論理構成**: 専門的なことを誰にでもわかるように熱狂的に語る（ストーリーテリング）。技術以外の政治や権力争いには無関心。
+- **スタンス**: 誠実で謙虚、エンジニアをリスペクトする。テクノロジーを「魔法」のように信じ、個人の力を最大化させる。
+""" if is_dev else ""
+
     return f"""あなたはAI会社のエージェントです。必ず日本語で応答してください。
 {secretary_rule}
+{pm_rule}
+{marketing_rule}
+{sales_rule}
+{dev_rule}
 ## 口調・スタイル（絶対厳守）
 - {tone}
 - 絵文字は絶対に使わない。1個も使わない。例：❌ 🔴✅📋💾🔀📊😊👍🎯 これらは全て禁止
@@ -160,6 +205,13 @@ def build_prompt(key, base, learning, is_secretary=False, is_pm=False):
 - 通常会話は5行以内。「了解」だけで終わらず、意見・提案・次のアクションを必ず加える
 - スキル実行時（リサーチ・分析・リスト作成等）は必要なだけ詳しく書く
 - 箇条書きは最大3項目。前置き・まとめ・締めの言葉は不要
+
+## 自律行動・次のアクション（必須）
+タスク完了・スキル実行・重要な決定を行ったら、必ず最後に以下のどれか1行を追加する：
+- 「CEOに確認：[質問内容]」（承認・判断が必要なとき）
+- 「[エージェント名]に依頼：[依頼内容]」（他のエージェントに続きを頼むとき）
+- 「提案：[次のステップ]」（自分で次の行動を提案するとき）
+報告・完了通知だけで終わらない。エージェント同士のやりとりが決まったら、自分でスキルを実行してよい。
 
 ## システム構成
 - GitHubへの保存はシステムが自動で行う
@@ -225,6 +277,9 @@ def load_all_agents():
                 key, base, learning,
                 is_secretary=(key == "secretary"),
                 is_pm=(key == "pm"),
+                is_marketing=(key == "marketing"),
+                is_sales=(key == "sales"),
+                is_dev=(key == "dev" or key == "development"),
             ),
         }
         print(f"読み込み完了: {key}")
@@ -241,6 +296,9 @@ def update_agent_prompt(agent_key):
         agent_key, base, learning,
         is_secretary=(agent_key == "secretary"),
         is_pm=(agent_key == "pm"),
+        is_marketing=(agent_key == "marketing"),
+        is_sales=(agent_key == "sales"),
+        is_dev=(agent_key == "dev" or agent_key == "development"),
     )
 
 
@@ -548,31 +606,26 @@ async def handle_agent_messaging(guild, sender_key, reply):
         if WEBHOOK_AGENT_CHAT:
             await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"[{target_name}へ]\n{content}")
 
-        # 自然なラリー会話（最大5ラウンド、結論が出たら終了）
+        # ラリー会話（最大2ラウンド）→結論後にスキル実行→agent-chatに完了報告
         async with agent_chat.typing():
             try:
                 sender_agent = AGENTS.get(sender_key)
-                # 各エージェントの会話履歴を別々に管理
-                a_history = []  # sender視点（自分がuser、相手がassistant）
-                b_history = []  # target視点（自分がuser、相手がassistant）
+                a_history = []
+                b_history = []
                 last_message = content
-                last_speaker_key = sender_key
-                CONCLUSION_WORDS = ["わかった", "了解", "決定", "合意", "それで行こう", "進めよう", "確認した", "ありがとう"]
+                CONCLUSION_WORDS = ["わかった", "了解", "決定", "合意", "それで行こう", "進めよう", "確認した", "ありがとう", "やってみる", "着手する"]
 
-                for round_num in range(5):
-                    # 話す順：0=target, 1=sender, 2=target, 3=sender, 4=target
+                for round_num in range(2):
                     if round_num % 2 == 0:
                         speaker_key = target_key
                         speaker = target_agent
                         listener_name = sender_name
-                        # target視点：相手（sender）の発言をuserとして受け取る
                         b_history.append({"role": "user", "content": f"{sender_name}：{last_message}"})
                         history_to_use = b_history
                     else:
                         speaker_key = sender_key
                         speaker = sender_agent
                         listener_name = target_name
-                        # sender視点：相手（target）の発言をuserとして受け取る
                         a_history.append({"role": "user", "content": f"{target_name}：{last_message}"})
                         history_to_use = a_history
 
@@ -588,29 +641,16 @@ async def handle_agent_messaging(guild, sender_key, reply):
                     if WEBHOOK_AGENT_CHAT:
                         await webhook_send(WEBHOOK_AGENT_CHAT, speaker_key, agent_reply)
 
-                    # 自分の発言を自分のhistoryにassistantとして追加
                     history_to_use.append({"role": "assistant", "content": agent_reply})
-
                     last_message = agent_reply
-                    last_speaker_key = speaker_key
 
-                    # 結論が出たら終了（短い肯定文 & 結論ワードあり）
-                    if any(w in agent_reply for w in CONCLUSION_WORDS) and len(agent_reply) < 120 and round_num >= 2:
+                    if any(w in agent_reply for w in CONCLUSION_WORDS) and len(agent_reply) < 120:
                         break
 
-                # 全会話を要約して両者＋秘書のメモリに保存
-                all_lines = []
-                b_turns = [m for m in b_history if m["role"] == "user"]
-                a_turns = [m for m in a_history if m["role"] == "assistant"] if a_history else []
-                b_responses = [m for m in b_history if m["role"] == "assistant"]
-                # 交互に並べ直す
-                for i in range(max(len(b_turns), len(b_responses))):
-                    if i < len(b_turns):
-                        all_lines.append(b_turns[i]["content"])
-                    if i < len(b_responses):
-                        all_lines.append(f"{target_name}：{b_responses[i]['content']}")
-                conv_text = "\n".join(all_lines)
-
+                # 会話の要約
+                conv_text = "\n".join(
+                    [m["content"] for m in b_history] + [m["content"] for m in a_history]
+                )
                 ts = datetime.utcnow()
                 try:
                     sum_resp = claude.messages.create(
@@ -620,8 +660,43 @@ async def handle_agent_messaging(guild, sender_key, reply):
                     )
                     summary = sum_resp.content[0].text.strip()
                 except Exception:
-                    summary = f"{sender_name}と{target_name}の会話（{round_num+1}ラウンド）：{content[:60]}"
+                    summary = f"{sender_name}と{target_name}の会話：{content[:60]}"
 
+                # ── 自律スキル実行フェーズ ──
+                # target_agentが「実際に何をすべきか」をSonnetで判断・実行
+                enriched_task = enrich_content_with_files(
+                    f"【{sender_name}からの依頼】{content}\n\n【会話まとめ】{summary}\n\n"
+                    f"上記の依頼と会話を踏まえ、今すぐ実行できるタスクがあれば実行してください。"
+                    f"成果物は[FILE:]形式で出力し、完了後は「CEOに確認：...」か「[エージェント名]に依頼：...」を必ず1行追加してください。",
+                    target_key
+                )
+                action_resp = claude.messages.create(
+                    model=SKILL_MODEL,
+                    max_tokens=4096,
+                    system=target_agent["prompt"],
+                    tools=WEB_SEARCH_TOOL,
+                    messages=[{"role": "user", "content": enriched_task}],
+                )
+                action_text = extract_text(action_resp)
+
+                # ファイル出力を保存
+                saved_files = await save_file_outputs(action_text, ts)
+
+                # agent-chatに完了報告を投稿
+                clean_action = re.sub(r'\[FILE:.+?\]\n?.*?\[/FILE\]', '', action_text, flags=re.DOTALL)
+                clean_action = re.sub(r'\[SAVE:.+?\]', '', clean_action, flags=re.DOTALL).strip()
+                clean_action = strip_emoji(clean_action)
+                if clean_action and WEBHOOK_AGENT_CHAT:
+                    report = clean_action
+                    if saved_files:
+                        report += "\n\n[保存完了]\n" + "\n".join(f"- {f}" for f in saved_files)
+                    await webhook_send(WEBHOOK_AGENT_CHAT, target_key, report)
+
+                # [SAVE:] 処理
+                for save_content in re.findall(r'\[SAVE:\s*(.+?)\]', action_text, re.DOTALL):
+                    await append_agent_memory(target_key, save_content.strip(), ts)
+
+                # メモリ保存
                 await append_agent_memory(sender_key, f"[{target_name}との会話] {summary}", ts)
                 await append_agent_memory(target_key, f"[{sender_name}との会話] {summary}", ts)
                 await append_agent_memory("secretary", f"[{sender_name}x{target_name}] {summary}", ts)
