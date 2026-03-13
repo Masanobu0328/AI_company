@@ -940,9 +940,13 @@ async def run_standup():
         return
     today = datetime.now().strftime("%Y年%m月%d日")
     log = []
+
+    # ── フェーズ1: 朝会（各自の予定共有）──
     opening = f"{today}の朝会を始める。各自、今日の予定・優先タスクを共有してくれ。"
     await webhook_send(WEBHOOK_AGENT_CHAT, "pm", opening)
     log.append(("グレン・スターンズ", opening))
+
+    standup_reports = {}
     for agent_key in ["secretary", "sales", "dev", "marketing"]:
         agent = AGENTS[agent_key]
         try:
@@ -955,11 +959,61 @@ async def run_standup():
             reply = strip_emoji(re.sub(r'\[.+?\]', '', resp.content[0].text, flags=re.DOTALL).strip())
             await webhook_send(WEBHOOK_AGENT_CHAT, agent_key, reply)
             log.append((agent["name"], reply))
+            standup_reports[agent_key] = reply
         except Exception as e:
             print(f"朝会エラー ({agent_key}): {e}")
-    closing = "ありがとう。各自タスクを進めてくれ。進捗は #task-board に。"
-    await webhook_send(WEBHOOK_AGENT_CHAT, "pm", closing)
-    log.append(("グレン・スターンズ", closing))
+
+    # ── フェーズ2: PMがメモリ・stateを読んでタスクを割り振る ──
+    try:
+        state_summary = get_state_summary()
+        # 各エージェントのメモリから未完了タスクを収集
+        memories = {}
+        for ak in ["sales", "marketing", "dev"]:
+            folder = KEY_TO_FOLDER.get(ak, ak)
+            mem_path = os.path.join(BASE_DIR, "agents", folder, "memory.md")
+            if os.path.exists(mem_path):
+                with open(mem_path, "r", encoding="utf-8") as f:
+                    memories[ak] = f.read()[-1500:]  # 直近1500文字
+
+        reports_text = "\n".join(f"[{k}] {v}" for k, v in standup_reports.items())
+        memory_text = "\n".join(f"[{k}メモリ末尾]\n{v}" for k, v in memories.items())
+
+        task_prompt = (
+            f"今日（{today}）の朝会報告と各エージェントのメモリを確認した。\n\n"
+            f"【朝会報告】\n{reports_text}\n\n"
+            f"【現在のステート】\n{state_summary}\n\n"
+            f"【各メモリ（末尾）】\n{memory_text}\n\n"
+            f"上記を踏まえ、今日中に完了すべき最優先タスクを各エージェントに割り振ってください。\n"
+            f"割り振りは [NEXT:agent: タスク内容] 形式で。最大3件まで。\n"
+            f"割り振り後、簡潔に「今日の方針」を1行で述べてください。"
+        )
+
+        pm_resp = claude.messages.create(
+            model=SKILL_MODEL,
+            max_tokens=600,
+            system=AGENTS["pm"]["prompt"],
+            messages=[{"role": "user", "content": task_prompt}],
+        )
+        pm_raw = pm_resp.content[0].text
+        pm_clean = re.sub(r'\[.+?\]', '', pm_raw, flags=re.DOTALL).strip()
+        pm_clean = strip_emoji(pm_clean)
+
+        await webhook_send(WEBHOOK_AGENT_CHAT, "pm", pm_clean)
+        log.append(("グレン・スターンズ", pm_clean))
+
+        # [NEXT:] を処理して各エージェントが自律実行
+        for target_key, task in re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', pm_raw, re.DOTALL):
+            target_key = target_key.lower()
+            if AGENTS.get(target_key):
+                await handle_next_task(agent_chat.guild, "pm", target_key, task)
+
+        # stateにタスク割り振りを記録
+        for target_key, task in re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', pm_raw, re.DOTALL):
+            state_update_task(target_key.lower(), "assigned", task.strip()[:80])
+
+    except Exception as e:
+        print(f"朝会タスク割り振りエラー: {e}")
+
     await save_standup_log(log)
 
 
