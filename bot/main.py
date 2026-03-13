@@ -3,15 +3,53 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 import os
 import anthropic
-import subprocess
 import re
 import aiohttp
+import base64
 from datetime import time as dtime, datetime
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 WEBHOOK_AGENT_CHAT = os.getenv("WEBHOOK_AGENT_CHAT")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+# GitHub設定
+GITHUB_OWNER = "Masanobu0328"
+GITHUB_REPO  = "AI_company"
+GITHUB_API   = "https://api.github.com"
+GITHUB_HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json",
+}
+
+# モデル設定
+CHAT_MODEL  = "claude-haiku-4-5-20251001"   # 通常会話
+SKILL_MODEL = "claude-sonnet-4-6"            # スキル実行時（高品質）
+
+# スキル判定キーワード（これを含む場合はSonnetを使用）
+SKILL_KEYWORDS = [
+    "LP設計", "コーディング", "ポジショニング分析", "営業リスト",
+    "SNS戦略", "提案書", "設計書", "モックアップ", "リサーチ",
+    "調査して", "分析して", "戦略を", "実装して", "作成して",
+    "書いて", "リストアップ", "検索して", "調べて", "コードを",
+]
+
+WEB_SEARCH_TOOL = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+
+
+def get_model(content):
+    """内容に応じてモデルを選択"""
+    if any(kw in content for kw in SKILL_KEYWORDS):
+        return SKILL_MODEL
+    return CHAT_MODEL
+
+
+def extract_text(response):
+    """APIレスポンスからテキストを抽出（web_search使用時も対応）"""
+    return "\n".join(
+        block.text for block in response.content if hasattr(block, "text")
+    )
 
 # 各エージェントチャンネルのWebhook
 AGENT_WEBHOOKS = {
@@ -106,55 +144,26 @@ def load_memory(agent_key=None):
     return ""
 
 
-def append_agent_memory(agent_key, content, timestamp):
-    """agents/[name]/memory.md に追記（エージェント個人の記憶）"""
+async def append_agent_memory(agent_key, content, timestamp):
+    """agents/[name]/memory.md に追記してGitHub APIで直接保存"""
     key_to_folder = {"secretary": "secretary", "sales": "sales", "pm": "pm",
                      "dev": "development", "development": "development", "marketing": "marketing"}
     folder = key_to_folder.get(agent_key, agent_key)
-    memory_file = os.path.join(BASE_DIR, "agents", folder, "memory.md")
-
+    path = f"agents/{folder}/memory.md"
     date_str = timestamp.strftime("%Y-%m-%d %H:%M")
-    entry = f"\n### {date_str}\n{content}\n"
-
-    with open(memory_file, "a", encoding="utf-8") as f:
-        if not os.path.exists(memory_file) or os.path.getsize(memory_file) == 0:
-            f.write("# 個人メモリ\n")
-        f.write(entry)
-
-    rel = os.path.join("agents", folder, "memory.md")
-    subprocess.run(["git", "add", rel], cwd=BASE_DIR, capture_output=True)
-    result = subprocess.run(
-        ["git", "commit", "-m", f"記憶更新 [{agent_key}]: {date_str}"],
-        cwd=BASE_DIR, capture_output=True, text=True, encoding='utf-8', errors='replace',
-    )
-    subprocess.run(["git", "push"], cwd=BASE_DIR, capture_output=True)
-    return result.returncode == 0
+    entry = f"### {date_str}\n{content}"
+    return await github_append_file(path, entry,
+        f"記憶更新 [{agent_key}]: {date_str}", header="# 個人メモリ\n")
 
 
-def append_shared_knowledge(content, timestamp):
-    """knowledge/shared/ に追記（全体共有知識）"""
-    shared_dir = os.path.join(BASE_DIR, "knowledge", "shared")
-    os.makedirs(shared_dir, exist_ok=True)
-
-    # 月単位で1ファイルにまとめる
+async def append_shared_knowledge(content, timestamp):
+    """knowledge/shared/YYYY-MM.md に追記してGitHub APIで直接保存"""
     month_str = timestamp.strftime("%Y-%m")
-    filepath = os.path.join(shared_dir, f"{month_str}.md")
     date_str = timestamp.strftime("%Y-%m-%d %H:%M")
-    entry = f"\n### {date_str}\n{content}\n"
-
-    with open(filepath, "a", encoding="utf-8") as f:
-        if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
-            f.write(f"# 共有ナレッジ {month_str}\n")
-        f.write(entry)
-
-    rel = os.path.join("knowledge", "shared", f"{month_str}.md")
-    subprocess.run(["git", "add", rel], cwd=BASE_DIR, capture_output=True)
-    result = subprocess.run(
-        ["git", "commit", "-m", f"共有ナレッジ追加: {date_str}"],
-        cwd=BASE_DIR, capture_output=True, text=True, encoding='utf-8', errors='replace',
-    )
-    subprocess.run(["git", "push"], cwd=BASE_DIR, capture_output=True)
-    return result.returncode == 0
+    path = f"knowledge/shared/{month_str}.md"
+    entry = f"### {date_str}\n{content}"
+    return await github_append_file(path, entry,
+        f"共有ナレッジ追加: {date_str}", header=f"# 共有ナレッジ {month_str}\n")
 
 
 def save_conversation_log(channel_name, messages):
@@ -172,17 +181,19 @@ def save_conversation_log(channel_name, messages):
             f.write(f"**[{time_str}] {role}**: {text}\n\n")
 
 
-def push_daily_logs():
-    """Layer3: 1日分のログをまとめてGitHubにpush（夜間バッチ用）"""
+async def push_daily_logs():
+    """Layer3: 1日分のローカルログをGitHub APIでまとめてpush"""
     date_str = datetime.now().strftime("%Y-%m-%d")
-    log_pattern = os.path.join("logs", f"{date_str}_*.md")
-    subprocess.run(["git", "add", log_pattern], cwd=BASE_DIR, capture_output=True)
-    result = subprocess.run(
-        ["git", "commit", "-m", f"会話ログ一括保存: {date_str}"],
-        cwd=BASE_DIR, capture_output=True, text=True, encoding='utf-8', errors='replace',
-    )
-    subprocess.run(["git", "push"], cwd=BASE_DIR, capture_output=True)
-    print(f"ログ日次push完了: {date_str} (returncode={result.returncode})")
+    log_dir = os.path.join(BASE_DIR, "logs")
+    if not os.path.exists(log_dir):
+        return
+    files = [f for f in os.listdir(log_dir) if f.startswith(date_str) and f.endswith(".md")]
+    for filename in files:
+        filepath = os.path.join(log_dir, filename)
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+        await github_write_file(f"logs/{filename}", content, f"会話ログ: {filename}")
+    print(f"ログ日次push完了: {date_str} ({len(files)}件)")
 
 
 def load_all_agents():
@@ -226,6 +237,16 @@ def load_all_agents():
 - CEOが「覚えて」「学習して」と言った場合、システムが自動保存する。あなたは「わかりました」とだけ答えればよい
 - 「学習しました」「記憶しました」「保存しました」という言葉は絶対に使わないこと（システムが別途通知するため）
 - 会話の中で「事業方針」「重要なルール」「フィードバック」「今後の方向性」など記憶すべき重要情報が含まれる場合、返答の末尾に必ず [SAVE: 一行で要約] を追加すること。CEOには表示されない。
+
+## 成果物の出力方法（重要）
+コード・設計書・提案書・営業リスト・HTMLなどの成果物は必ず以下の形式で出力すること：
+[FILE:projects/goldcoast/[担当フォルダ]/ファイル名.拡張子]
+内容をここに記述
+[/FILE]
+このブロックはCEOには表示されず、自動的にGitHubに保存される。
+- 営業リスト → projects/goldcoast/sales/
+- LP・コード → projects/goldcoast/dev/
+- 戦略・分析 → projects/goldcoast/marketing/
 
 ## エージェント間メッセージング
 返答の末尾に以下のマーカーを追加することで他のエージェントやチャンネルに情報を送れる（CEOには表示されない）：
@@ -278,6 +299,50 @@ def is_all_hands_channel(channel_name):
     return any(pattern in channel_name for pattern in ALL_HANDS_PATTERNS)
 
 
+async def github_get_file(path):
+    """GitHubからファイルの内容とSHAを取得"""
+    url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{path}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=GITHUB_HEADERS) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                content = base64.b64decode(data["content"]).decode("utf-8")
+                return content, data["sha"]
+    return None, None
+
+
+async def github_write_file(path, content, commit_message):
+    """GitHubにファイルを直接作成・更新（ローカルにも保存）"""
+    url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{path}"
+
+    # ローカルにも保存
+    local_path = os.path.join(BASE_DIR, path.replace("/", os.sep))
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    with open(local_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    # GitHubの現在のSHAを取得
+    _, sha = await github_get_file(path)
+
+    encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    body = {"message": commit_message, "content": encoded}
+    if sha:
+        body["sha"] = sha
+
+    async with aiohttp.ClientSession() as session:
+        async with session.put(url, headers=GITHUB_HEADERS, json=body) as resp:
+            return resp.status in (200, 201)
+
+
+async def github_append_file(path, new_entry, commit_message, header=""):
+    """GitHubのファイルに追記（存在しなければ新規作成）"""
+    current_content, _ = await github_get_file(path)
+    if current_content is None:
+        current_content = header
+    updated = current_content.rstrip() + "\n\n" + new_entry.strip() + "\n"
+    return await github_write_file(path, updated, commit_message)
+
+
 def update_agent_prompt(agent_key):
     """学習ログを再読み込みしてエージェントのプロンプトを即時更新"""
     if agent_key not in AGENTS:
@@ -310,6 +375,16 @@ def update_agent_prompt(agent_key):
 - CEOが「覚えて」「学習して」と言った場合、システムが自動保存する。あなたは「わかりました」とだけ答えればよい
 - 「学習しました」「記憶しました」「保存しました」という言葉は絶対に使わないこと（システムが別途通知するため）
 - 会話の中で「事業方針」「重要なルール」「フィードバック」「今後の方向性」など記憶すべき重要情報が含まれる場合、返答の末尾に必ず [SAVE: 一行で要約] を追加すること。CEOには表示されない。
+
+## 成果物の出力方法（重要）
+コード・設計書・提案書・営業リスト・HTMLなどの成果物は必ず以下の形式で出力すること：
+[FILE:projects/goldcoast/[担当フォルダ]/ファイル名.拡張子]
+内容をここに記述
+[/FILE]
+このブロックはCEOには表示されず、自動的にGitHubに保存される。
+- 営業リスト → projects/goldcoast/sales/
+- LP・コード → projects/goldcoast/dev/
+- 戦略・分析 → projects/goldcoast/marketing/
 
 ## エージェント間メッセージング
 返答の末尾に以下のマーカーを追加することで他のエージェントやチャンネルに情報を送れる（CEOには表示されない）：
@@ -397,6 +472,21 @@ async def webhook_send(webhook_url, agent_key, content):
     async with aiohttp.ClientSession() as session:
         webhook = discord.Webhook.from_url(webhook_url, session=session)
         await webhook.send(content=content, username=agent_name, avatar_url=avatar_url)
+
+
+async def save_file_outputs(reply, timestamp):
+    """[FILE:path]内容[/FILE] ブロックを検出してGitHubに保存"""
+    pattern = r'\[FILE:([^\]]+)\]\n?(.*?)\[/FILE\]'
+    files = re.findall(pattern, reply, re.DOTALL)
+    saved = []
+    for path, content in files:
+        path = path.strip()
+        content = content.strip()
+        date_str = timestamp.strftime("%Y-%m-%d %H:%M")
+        success = await github_write_file(path, content, f"成果物: {path} ({date_str})")
+        if success:
+            saved.append(path)
+    return saved
 
 
 async def handle_agent_messaging(guild, sender_key, reply):
@@ -520,21 +610,28 @@ async def handle_delegation(guild, pm_response):
 
 
 async def handle_all_hands(message, content):
-    """全体チャンネル: 全エージェントが順番に応答（Webhook使用）"""
+    """全体チャンネル: 全エージェントが応答し、各自のメモリに保存"""
     agent_order = ["secretary", "pm", "sales", "dev", "marketing"]
     use_webhook = WEBHOOK_AGENT_CHAT and "agent-chat" in message.channel.name
 
+    # CEOの発言を全エージェントのメモリに保存
+    for agent_key in agent_order:
+        await append_agent_memory(agent_key, f"[全体会議] {content}", message.created_at)
+        update_agent_prompt(agent_key)
+
+    # 各エージェントが応答（受信確認を含む）
     for agent_key in agent_order:
         agent = AGENTS[agent_key]
         async with message.channel.typing():
             try:
+                system_with_context = agent["prompt"] + "\n\n## 全体会議での応答ルール\n全体会議でCEOから情報を受け取った場合、内容に対して簡潔に返答し、最後に「📥 メモリに保存しました」と必ず付け加えること。"
                 response = claude.messages.create(
                     model="claude-haiku-4-5-20251001",
-                    max_tokens=300,
-                    system=agent["prompt"],
+                    max_tokens=200,
+                    system=system_with_context,
                     messages=[{"role": "user", "content": content}],
                 )
-                reply = re.sub(r'\[→\w+:.+?\]', '', response.content[0].text, flags=re.DOTALL).strip()
+                reply = re.sub(r'\[.+?\]', '', response.content[0].text, flags=re.DOTALL).strip()
 
                 if use_webhook:
                     await webhook_send(WEBHOOK_AGENT_CHAT, agent_key, reply)
@@ -544,30 +641,15 @@ async def handle_all_hands(message, content):
                 print(f"全体返答エラー ({agent_key}): {e}")
 
 
-def save_standup_log(messages):
-    """スタンドアップの会話をGitHubに保存"""
+async def save_standup_log(messages):
+    """スタンドアップの会話をGitHub APIで直接保存"""
     date_str = datetime.now().strftime("%Y-%m-%d")
-    log_dir = os.path.join(BASE_DIR, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    filepath = os.path.join(log_dir, f"{date_str}_standup.md")
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(f"""---
-title: 朝会ログ {date_str}
-作成日: {date_str}
-作成者: Bot（自動）
-tags: [standup, log]
-status: active
----
-
-# 朝会 {date_str}
-
-""")
-        for name, text in messages:
-            f.write(f"**{name}**\n{text}\n\n")
-    rel = os.path.join("logs", f"{date_str}_standup.md")
-    subprocess.run(["git", "add", rel], cwd=BASE_DIR, capture_output=True)
-    subprocess.run(["git", "commit", "-m", f"朝会ログ: {date_str}"], cwd=BASE_DIR, capture_output=True)
-    subprocess.run(["git", "push"], cwd=BASE_DIR, capture_output=True)
+    path = f"logs/{date_str}_standup.md"
+    lines = [f"# 朝会ログ {date_str}\n"]
+    for name, text in messages:
+        lines.append(f"**{name}**\n{text}\n")
+    content = "\n".join(lines)
+    await github_write_file(path, content, f"朝会ログ: {date_str}")
 
 
 async def run_standup():
@@ -607,7 +689,7 @@ async def run_standup():
     log.append(("グレン・スターンズ", closing))
 
     # GitHubに保存
-    save_standup_log(log)
+    await save_standup_log(log)
 
 
 async def run_sns_drafts():
@@ -652,7 +734,7 @@ async def morning_routine():
 # 毎日23:59（JST）= UTC 14:59 にログをまとめてpush
 @tasks.loop(time=dtime(14, 59))
 async def nightly_log_push():
-    push_daily_logs()
+    await push_daily_logs()
 
 
 @bot.event
@@ -726,16 +808,16 @@ async def on_message(message):
                         (k for name, k in name_to_key.items() if name in content), None
                     )
                     if targeted_key:
-                        success = append_agent_memory(targeted_key, content, message.created_at)
+                        success = await append_agent_memory(targeted_key, content, message.created_at)
                         update_agent_prompt(targeted_key)
                         target_name = AGENTS[targeted_key]["name"]
                         msg = f"💾 **{target_name}の個人メモリに保存しました**" if success else "⚠️ 保存に失敗しました。"
                     else:
-                        success = append_shared_knowledge(content, message.created_at)
+                        success = await append_shared_knowledge(content, message.created_at)
                         msg = "💾 **共有ナレッジに保存しました**（全エージェントが参照）" if success else "⚠️ 保存に失敗しました。"
                     await message.channel.send(msg)
                 else:
-                    success = append_agent_memory(agent_key, content, message.created_at)
+                    success = await append_agent_memory(agent_key, content, message.created_at)
                     update_agent_prompt(agent_key)
                     if success:
                         await message.channel.send(f"💾 **memory.mdに保存しました**（{agent['name']}の個人メモリに追記）")
@@ -759,33 +841,48 @@ async def on_message(message):
                     print(f"学習応答エラー: {e}")
             return
 
-        # 通常応答（会話履歴付き）
+        # 通常応答（モデル自動切り替え・会話履歴付き）
         async with message.channel.typing():
             try:
                 ch_id = message.channel.id
                 history = conversation_history.get(ch_id, [])
                 history.append({"role": "user", "content": content})
 
-                response = claude.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=1024,
+                model = get_model(content)
+                is_skill = model == SKILL_MODEL
+                kwargs = dict(
+                    model=model,
+                    max_tokens=4096 if is_skill else 1024,
                     system=agent["prompt"],
                     messages=history,
                 )
-                reply = response.content[0].text
+                if is_skill:
+                    kwargs["tools"] = WEB_SEARCH_TOOL
+
+                response = claude.messages.create(**kwargs)
+                reply = extract_text(response)
+
+                if is_skill:
+                    await message.channel.send(f"🔀 *Sonnet ({SKILL_MODEL}) で実行中...*", delete_after=3)
 
                 # エージェント自動判断：[SAVE: 内容] を検出して保存
                 save_matches = re.findall(r'\[SAVE:\s*(.+?)\]', reply, re.DOTALL)
                 for save_content in save_matches:
                     save_content = save_content.strip()
                     if is_all_hands_channel(channel_name):
-                        append_shared_knowledge(save_content, message.created_at)
+                        await append_shared_knowledge(save_content, message.created_at)
                     else:
-                        append_agent_memory(agent_key, save_content, message.created_at)
+                        await append_agent_memory(agent_key, save_content, message.created_at)
                         update_agent_prompt(agent_key)
 
-                # [SAVE:...] と [→...:...] を除いてCEOに表示
-                clean_reply = re.sub(r'\[SAVE:.+?\]', '', reply, flags=re.DOTALL)
+                # [FILE:] 成果物を自動保存
+                saved_files = await save_file_outputs(reply, message.created_at)
+                if saved_files:
+                    await message.channel.send(f"💾 **GitHub保存完了**\n" + "\n".join(f"• `{f}`" for f in saved_files))
+
+                # 各種マーカーを除いてCEOに表示
+                clean_reply = re.sub(r'\[FILE:.+?\]\n?.*?\[/FILE\]', '', reply, flags=re.DOTALL)
+                clean_reply = re.sub(r'\[SAVE:.+?\]', '', clean_reply, flags=re.DOTALL)
                 clean_reply = re.sub(r'\[→\w+:.+?\]', '', clean_reply, flags=re.DOTALL).strip()
 
                 # 履歴に追加（Layer2: 最大10ターン保持）

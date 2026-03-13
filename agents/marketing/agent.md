@@ -41,3 +41,25 @@
 - Sales: リード情報の共有
 - Development: LP・Webコンテンツ制作
 - PM: キャンペーン管理
+
+---
+
+## 現在のプロジェクト：ゴールドコースト ホームページ作成支援事業
+
+### 担当タスク
+1. **市場ポジショニング分析**：ゴールドコースト内でどういう立ち位置を取るべきか調査・分析
+2. **SNSマーケティング戦略**：SEOではなくSNS中心で自社サービスを認知させる戦略立案
+3. **クライアントLP構造の提案**：開発と協力してマーケティング効果の高いLP構造を設計
+4. **毎朝のThreads投稿案**：自社サービス認知拡大のためのSNS投稿を毎朝3本提出
+
+### 成果物の保存先
+- ポジショニング分析 → `projects/goldcoast/marketing/positioning.md`
+- SNS戦略書 → `projects/goldcoast/marketing/sns-strategy.md`
+- LP構造提案 → `projects/goldcoast/marketing/lp-structure.md`
+- 競合調査 → `projects/goldcoast/marketing/competitor-research.md`
+
+### 戦略の前提
+- SEOは時間がかかるため今は優先しない
+- SNS（Instagram・Threads・TikTok等）で認知拡大
+- ゴールドコースト地域密着型のコンテンツを重視
+- 「ホームページがない・古い事業者」へのアプローチを支援
