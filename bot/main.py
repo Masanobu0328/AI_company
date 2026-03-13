@@ -36,8 +36,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # チャンネルごとの会話履歴（最大20ターン保持）
 conversation_history = {}
 
-# 学習トリガーキーワード
-LEARNING_TRIGGERS = ["覚えて", "学習して", "学習:", "メモして", "覚えといて", "次からは"]
+# 学習トリガーキーワード（CEO側からの明示的な保存指示）
+LEARNING_TRIGGERS = [
+    "覚えて", "学習して", "学習:", "メモして", "覚えといて", "次からは",
+    "共有して", "保存して", "記録して", "重要", "方針", "ルール", "必ず", "絶対に"
+]
 
 # 全体チャンネル名パターン（agent-chatを兼用）
 ALL_HANDS_PATTERNS = ["全体", "all-hands", "all_hands", "general", "みんな", "agent-chat"]
@@ -220,7 +223,19 @@ def load_all_agents():
 - あなたはDiscord Botシステムの一部として動作している
 - GitHubへの保存・ログ記録はシステムが自動で行う
 - 「GitHubに保存できません」「ログを残せません」などとは絶対に言わないこと
-- CEOが「覚えて」「学習して」と言ったら「✅ 学習しました」と応答するだけでよい
+- CEOが「覚えて」「学習して」と言った場合、システムが自動保存する。あなたは「わかりました」とだけ答えればよい
+- 「学習しました」「記憶しました」「保存しました」という言葉は絶対に使わないこと（システムが別途通知するため）
+- 会話の中で「事業方針」「重要なルール」「フィードバック」「今後の方向性」など記憶すべき重要情報が含まれる場合、返答の末尾に必ず [SAVE: 一行で要約] を追加すること。CEOには表示されない。
+
+## エージェント間メッセージング
+返答の末尾に以下のマーカーを追加することで他のエージェントやチャンネルに情報を送れる（CEOには表示されない）：
+- [SHARE: 内容] → #agent-chat（全体）に投稿
+- [MSG:pm: 内容] → グレン・スターンズ（PM）に直接送る
+- [MSG:sales: 内容] → グラント・カードン（営業）に直接送る
+- [MSG:dev: 内容] → スティーブ・ウォズニアック（開発）に直接送る
+- [MSG:marketing: 内容] → 森岡毅（マーケティング）に直接送る
+- [MSG:secretary: 内容] → 菅義偉（秘書）に直接送る
+CEOが「全体に共有して」「〇〇に伝えて」と言ったら積極的に使うこと。
 {delegation}
 ## エージェント定義
 {base}
@@ -292,7 +307,19 @@ def update_agent_prompt(agent_key):
 - あなたはDiscord Botシステムの一部として動作している
 - GitHubへの保存・ログ記録はシステムが自動で行う
 - 「GitHubに保存できません」「ログを残せません」などとは絶対に言わないこと
-- CEOが「覚えて」「学習して」と言ったら「✅ 学習しました」と応答するだけでよい
+- CEOが「覚えて」「学習して」と言った場合、システムが自動保存する。あなたは「わかりました」とだけ答えればよい
+- 「学習しました」「記憶しました」「保存しました」という言葉は絶対に使わないこと（システムが別途通知するため）
+- 会話の中で「事業方針」「重要なルール」「フィードバック」「今後の方向性」など記憶すべき重要情報が含まれる場合、返答の末尾に必ず [SAVE: 一行で要約] を追加すること。CEOには表示されない。
+
+## エージェント間メッセージング
+返答の末尾に以下のマーカーを追加することで他のエージェントやチャンネルに情報を送れる（CEOには表示されない）：
+- [SHARE: 内容] → #agent-chat（全体）に投稿
+- [MSG:pm: 内容] → グレン・スターンズ（PM）に直接送る
+- [MSG:sales: 内容] → グラント・カードン（営業）に直接送る
+- [MSG:dev: 内容] → スティーブ・ウォズニアック（開発）に直接送る
+- [MSG:marketing: 内容] → 森岡毅（マーケティング）に直接送る
+- [MSG:secretary: 内容] → 菅義偉（秘書）に直接送る
+CEOが「全体に共有して」「〇〇に伝えて」と言ったら積極的に使うこと。
 {pm_delegation_rule}
 ## エージェント定義
 {base}
@@ -370,6 +397,75 @@ async def webhook_send(webhook_url, agent_key, content):
     async with aiohttp.ClientSession() as session:
         webhook = discord.Webhook.from_url(webhook_url, session=session)
         await webhook.send(content=content, username=agent_name, avatar_url=avatar_url)
+
+
+async def handle_agent_messaging(guild, sender_key, reply):
+    """[SHARE:] と [MSG:agent:] マーカーを処理してエージェント間の会話を#agent-chatで展開"""
+    agent_chat = discord.utils.get(guild.text_channels, name="agent-chat")
+    if not agent_chat:
+        return
+
+    sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
+    exchanges = []  # (送信先名, 内容, 返答) を記録
+
+    # [SHARE: 内容] → #agent-chat に全体投稿
+    share_matches = re.findall(r'\[SHARE:\s*(.+?)\]', reply, re.DOTALL)
+    for content in share_matches:
+        content = content.strip()
+        if WEBHOOK_AGENT_CHAT:
+            await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"📢 **全体共有**\n{content}")
+            exchanges.append(("全体", content, None))
+
+    # [MSG:agent: 内容] → 個別エージェントに送り、返答を#agent-chatで見せる
+    msg_matches = re.findall(r'\[MSG:(\w+):\s*(.+?)\]', reply, re.DOTALL)
+
+    for target_key, content in msg_matches:
+        target_key = target_key.lower()
+        content = content.strip()
+        target_agent = AGENTS.get(target_key)
+        if not target_agent:
+            continue
+
+        target_name = target_agent["name"]
+        target_webhook = AGENT_WEBHOOKS.get(target_key)
+
+        # #agent-chatで送信を見せる
+        if WEBHOOK_AGENT_CHAT:
+            await webhook_send(WEBHOOK_AGENT_CHAT, sender_key,
+                f"📨 **{target_name}へ**\n{content}")
+
+        # 受信エージェントが自動返答（#agent-chatで展開）
+        async with agent_chat.typing():
+            try:
+                response = claude.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=300,
+                    system=target_agent["prompt"],
+                    messages=[{"role": "user", "content": f"{sender_name}から連絡：{content}"}],
+                )
+                agent_reply = re.sub(r'\[.+?\]', '', response.content[0].text, flags=re.DOTALL).strip()
+
+                # #agent-chatで返答を見せる
+                if WEBHOOK_AGENT_CHAT:
+                    await webhook_send(WEBHOOK_AGENT_CHAT, target_key, agent_reply)
+
+                # 受信先チャンネルにも通知
+                if target_webhook:
+                    await webhook_send(target_webhook, sender_key,
+                        f"📨 {sender_name}より：{content}")
+
+                exchanges.append((target_name, content, agent_reply))
+            except Exception as e:
+                print(f"エージェント間会話エラー: {e}")
+
+    # 全やり取り完了後に#agent-chatで要約を報告
+    if exchanges and WEBHOOK_AGENT_CHAT:
+        summary_lines = []
+        for target_name, content, agent_reply in exchanges:
+            summary_lines.append(f"• **{target_name}**：{content[:40]}{'...' if len(content) > 40 else ''}")
+        summary = "\n".join(summary_lines)
+        await webhook_send(WEBHOOK_AGENT_CHAT, sender_key,
+            f"✅ **共有完了レポート**\n{summary}")
 
 
 async def handle_delegation(guild, pm_response):
@@ -618,16 +714,33 @@ async def on_message(message):
         # 学習トリガー検出
         if is_learning_message(content):
             async with message.channel.typing():
-                # 全体会議 → 共有ナレッジ、個別チャンネル → 個人メモリ
+                # 保存先の判定：全体チャットでも名前が含まれれば個人メモリへ
                 if is_all_hands_channel(channel_name):
-                    success = append_shared_knowledge(content, message.created_at)
-                    learn_msg = "✅ 共有ナレッジに保存しました。全エージェントが参照します。" if success else "⚠️ 保存に失敗しました。"
-                    await message.channel.send(learn_msg)
+                    # メッセージ内に特定エージェントの名前があれば個人メモリに保存
+                    name_to_key = {
+                        "森岡": "marketing", "グラント": "sales",
+                        "グレン": "pm", "ウォズ": "dev", "ウォズニアック": "dev",
+                        "菅": "secretary",
+                    }
+                    targeted_key = next(
+                        (k for name, k in name_to_key.items() if name in content), None
+                    )
+                    if targeted_key:
+                        success = append_agent_memory(targeted_key, content, message.created_at)
+                        update_agent_prompt(targeted_key)
+                        target_name = AGENTS[targeted_key]["name"]
+                        msg = f"💾 **{target_name}の個人メモリに保存しました**" if success else "⚠️ 保存に失敗しました。"
+                    else:
+                        success = append_shared_knowledge(content, message.created_at)
+                        msg = "💾 **共有ナレッジに保存しました**（全エージェントが参照）" if success else "⚠️ 保存に失敗しました。"
+                    await message.channel.send(msg)
                 else:
                     success = append_agent_memory(agent_key, content, message.created_at)
                     update_agent_prompt(agent_key)
-                    learn_msg = "✅ 学習しました。" if success else "⚠️ 学習ログの保存に失敗しました。"
-                    await message.channel.send(f"**{agent['name']}** {learn_msg}")
+                    if success:
+                        await message.channel.send(f"💾 **memory.mdに保存しました**（{agent['name']}の個人メモリに追記）")
+                    else:
+                        await message.channel.send(f"⚠️ 保存に失敗しました。")
                 # エージェントとしても応答
                 try:
                     response = claude.messages.create(
@@ -660,7 +773,20 @@ async def on_message(message):
                     messages=history,
                 )
                 reply = response.content[0].text
-                clean_reply = re.sub(r'\[→\w+:.+?\]', '', reply, flags=re.DOTALL).strip()
+
+                # エージェント自動判断：[SAVE: 内容] を検出して保存
+                save_matches = re.findall(r'\[SAVE:\s*(.+?)\]', reply, re.DOTALL)
+                for save_content in save_matches:
+                    save_content = save_content.strip()
+                    if is_all_hands_channel(channel_name):
+                        append_shared_knowledge(save_content, message.created_at)
+                    else:
+                        append_agent_memory(agent_key, save_content, message.created_at)
+                        update_agent_prompt(agent_key)
+
+                # [SAVE:...] と [→...:...] を除いてCEOに表示
+                clean_reply = re.sub(r'\[SAVE:.+?\]', '', reply, flags=re.DOTALL)
+                clean_reply = re.sub(r'\[→\w+:.+?\]', '', clean_reply, flags=re.DOTALL).strip()
 
                 # 履歴に追加（Layer2: 最大10ターン保持）
                 history.append({"role": "assistant", "content": clean_reply})
@@ -677,6 +803,10 @@ async def on_message(message):
 
                 if agent_key == "pm" and message.guild:
                     await handle_delegation(message.guild, reply)
+
+                # エージェント間メッセージング（全エージェント共通）
+                if message.guild and ('[SHARE:' in reply or '[MSG:' in reply):
+                    await handle_agent_messaging(message.guild, agent_key, reply)
 
             except Exception as e:
                 print(f"エラー: {e}")
