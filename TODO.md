@@ -38,21 +38,32 @@
 
 ## 次回TODO
 
-### 優先度：高
-- [ ] PCスリープ設定変更（Bot常時稼働のため）
-- [ ] Botの起動を自動化（PC起動時に自動スタート）
-- [ ] ゴールドコースト営業リスト作成（グラントに依頼）
-- [ ] 市場ポジショニング分析（森岡に依頼）
+### 優先度：高（次回セッションでやること）
+
+- [ ] **PCスリープ設定変更**（Botが落ちないようにスリープ無効化）
+- [ ] **Bot起動の自動化**（PC起動時にタスクスケジューラで自動スタート）
+- [ ] **会社用Googleアカウント作成**（Bot専用・個人アカウントと分離）
+  - 作成後：Google Cloud Project設定
+  - Sheets API / Gmail API / Drive API を有効化
+  - Service Account認証ファイルを発行 → .envに追加
+  - BotからSheets書き込み・Gmail送信ができるようにする
+- [ ] **ゴールドコーストプロジェクトを実際に回す**
+  - グラントに営業リスト作成を依頼（Discord #グラント-営業）
+  - 森岡にポジショニング分析を依頼（Discord #森岡-マーケティング）
+  - ウォズニアックにLP第一弾モックアップ依頼
 
 ### 優先度：中
+
 - [ ] VPSへの移行（Railway/Render）で24時間稼働
-- [ ] LP第一弾モックアップ作成（ウォズニアックに依頼）
-- [ ] Vercel自動デプロイ設定
+- [ ] Vercel自動デプロイ設定（GitHub push → 自動反映）
+- [ ] Gemini APIの検討（画像生成・モックアップ用途）
 
 ### 優先度：低
+
 - [ ] OpenClaw（Claude Computer Use）導入で完全自律化
 - [ ] RAG実装（ログが溜まってから）
 - [ ] Discord以外の入力チャンネル検討（LINE / Slack等）
+- [ ] NotebookLM活用検討
 
 ---
 
@@ -60,9 +71,10 @@
 | サービス | 状態 |
 |---|---|
 | GitHub (AI_company) | ✅ API直接書き込み対応 |
-| Google Drive MCP | ✅ 読み取り専用 |
-| Gmail MCP | ✅ |
-| Google Calendar MCP | ✅ |
+| Google Drive MCP | ✅ 読み取り専用（Claude Code経由） |
+| Gmail MCP | ✅ Claude Code経由のみ・Bot未接続 |
+| Google Calendar MCP | ✅ Claude Code経由のみ・Bot未接続 |
 | Discord Bot | ✅ 稼働中（ローカルPC・手動起動） |
 | Web検索 | ✅ Anthropic web_search統合済み |
+| Google Sheets | ❌ 未設定（会社用Gアカウント作成後に対応） |
 | サーバー（VPS） | ❌ 未設定 |
