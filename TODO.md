@@ -6,17 +6,20 @@
 
 - [x] Google Drive MCP 接続確認
 - [x] リポジトリ設計刷新（INPUT/OUTPUT完全分離）
-  - Obsidian Vault = CEOの脳（読み取り専用）
-  - GitHub = 会社の全アウトプット
-- [x] `knowledge/` フォルダ新設（ideas/research/clients/projects/playbooks）
-- [x] `vault_schema/` 解体・テンプレートを `knowledge/_templates/` に統合
+- [x] `knowledge/` フォルダ新設
 - [x] 各エージェントを `agent.md` に統合・`skills/` フォルダ新設
 - [x] Discord Bot 作成・起動
 - [x] Claude API（Haiku）接続
 - [x] チャンネル別エージェント自動振り分け
-- [x] CEO専用アクセス制限（ユーザーID制限）
+- [x] CEO専用アクセス制限
 - [x] `agent.md` をBotが起動時に自動読み込み
-- [x] 応答スタイル最適化（基本3行・詳細は要求時のみ）
+- [x] 応答スタイル最適化
+- [x] Discordチャンネル構成の最終整備
+  - チャンネル名：名前＋役割形式
+  - Webhook導入：各エージェントが独自の名前・アイコンで発言
+  - エージェント別学習ログ（チャンネル内で「覚えて」）
+  - #agent-chat：全体会議 & エージェント間自動会話
+  - #task-board：タスク進捗の自動通知
 
 ---
 
@@ -24,8 +27,9 @@
 
 ### 優先度：高
 - [ ] PCスリープ設定変更（Bot常時稼働のため）
-- [ ] Discordチャンネル構成の最終整備
 - [ ] Botの起動を自動化（PC起動時に自動スタート）
+- [ ] エージェント自律化①：定期スタンドアップ（PMが毎朝自動で会議を開始）
+- [ ] エージェント自律化②：#agent-chat の会話を自動でGitHubに保存・学習
 
 ### 優先度：中
 - [ ] VPSへの移行（Railway/Render）で24時間稼働
@@ -45,5 +49,5 @@
 | Google Drive MCP | ✅ 読み取り専用 |
 | Gmail MCP | ✅ |
 | Google Calendar MCP | ✅ |
-| Discord Bot | ✅ 稼働中（ローカルPC） |
+| Discord Bot | ✅ 稼働中（ローカルPC・手動起動） |
 | サーバー（VPS） | ❌ 未設定 |
