@@ -425,6 +425,31 @@ def save_excel_locally(path, content, timestamp):
 PROGRESS_KEYWORDS = ["進捗", "状況", "どうなって", "どこまで", "何してる", "何やってる", "報告して", "確認して"]
 
 
+def enrich_content_with_files(content, agent_key):
+    """エージェントのメモリに記載されたファイルパスを検出し、内容をメッセージに自動付加する"""
+    folder = KEY_TO_FOLDER.get(agent_key, agent_key)
+    memory_path = os.path.join(BASE_DIR, "agents", folder, "memory.md")
+    if not os.path.exists(memory_path):
+        return content
+    with open(memory_path, "r", encoding="utf-8") as f:
+        memory_text = f.read()
+    # メモリ内のファイルパスを抽出（.md / .csv / .txt）
+    paths = re.findall(r'projects/[\w/.\-_]+\.(?:md|csv|txt)', memory_text)
+    additions = []
+    for path in dict.fromkeys(paths):  # 重複除去・順序保持
+        local = os.path.join(BASE_DIR, path.replace("/", os.sep))
+        if os.path.exists(local):
+            try:
+                with open(local, "r", encoding="utf-8") as f:
+                    file_content = f.read()
+                additions.append(f"\n\n[参照ファイル: {path}]\n{file_content[:3000]}\n[/参照ファイル]")
+            except Exception:
+                pass
+    if additions:
+        return content + "".join(additions)
+    return content
+
+
 async def collect_progress_report():
     """各エージェントに直接問い合わせて進捗を収集し、秘書が要約して返す"""
     reports = {}
@@ -860,7 +885,9 @@ async def on_message(message):
             try:
                 ch_id = message.channel.id
                 history = conversation_history.get(ch_id, [])
-                history.append({"role": "user", "content": content})
+                # メモリ内のファイルパスを自動読み込みしてコンテキストに注入
+                enriched = enrich_content_with_files(content, agent_key)
+                history.append({"role": "user", "content": enriched})
 
                 model = get_model(content)
                 is_skill = model == SKILL_MODEL
