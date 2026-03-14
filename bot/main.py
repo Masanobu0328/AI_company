@@ -318,10 +318,17 @@ def load_all_agents():
 - LP・コード → projects/goldcoast/dev/
 - 戦略・分析 → projects/goldcoast/marketing/
 
-## エージェント間メッセージング
-返答の末尾にマーカーを追加することで他のエージェントに送れる（CEOには表示されない）：
-- [MSG:pm: 内容] / [MSG:sales: 内容] / [MSG:dev: 内容] / [MSG:marketing: 内容] / [MSG:secretary: 内容]
-- [SHARE: 内容] → #agent-chatに全体投稿
+## エージェント間メッセージング（返答末尾に追加、CEOには表示されない）
+- [MSG:agent: 内容] → 相談・確認（チャットのみ）
+- [NEXT:agent: タスク内容] → 次の担当にタスクを引き渡す（相手が自律実行）
+- [DONE:CEO: サマリー] → CEOへ提出（重要な意思決定が必要なときのみ）
+- [SHARE: 内容] → agent-chatに全体周知
+
+## パイプラインの鉄則
+- 自分のタスクが完了したら必ず [NEXT:] で次の担当に渡す。完了で止まらない
+- [DONE:CEO:] は「戦略・予算・方向性の最終決定」が必要なときだけ使う
+- リサーチ・分析・制作の完了はCEOに報告しない。次のエージェントに [NEXT:] で渡す
+- 例：分析完了 → [NEXT:pm: 分析結果を添付] → PMが判断 → [DONE:CEO: 提案書完成]
 
 ## 秘書への報告（必須）
 タスク完了・重要な決定・他エージェントへの依頼時は必ず [MSG:secretary: 1〜2行で報告] を追加すること
@@ -466,10 +473,17 @@ def update_agent_prompt(agent_key):
 - LP・コード → projects/goldcoast/dev/
 - 戦略・分析 → projects/goldcoast/marketing/
 
-## エージェント間メッセージング
-返答の末尾にマーカーを追加することで他のエージェントに送れる（CEOには表示されない）：
-- [MSG:pm: 内容] / [MSG:sales: 内容] / [MSG:dev: 内容] / [MSG:marketing: 内容] / [MSG:secretary: 内容]
-- [SHARE: 内容] → #agent-chatに全体投稿
+## エージェント間メッセージング（返答末尾に追加、CEOには表示されない）
+- [MSG:agent: 内容] → 相談・確認（チャットのみ）
+- [NEXT:agent: タスク内容] → 次の担当にタスクを引き渡す（相手が自律実行）
+- [DONE:CEO: サマリー] → CEOへ提出（重要な意思決定が必要なときのみ）
+- [SHARE: 内容] → agent-chatに全体周知
+
+## パイプラインの鉄則
+- 自分のタスクが完了したら必ず [NEXT:] で次の担当に渡す。完了で止まらない
+- [DONE:CEO:] は「戦略・予算・方向性の最終決定」が必要なときだけ使う
+- リサーチ・分析・制作の完了はCEOに報告しない。次のエージェントに [NEXT:] で渡す
+- 例：分析完了 → [NEXT:pm: 分析結果を添付] → PMが判断 → [DONE:CEO: 提案書完成]
 
 ## 秘書への報告（必須）
 タスク完了・重要な決定・他エージェントへの依頼時は必ず [MSG:secretary: 1〜2行で報告] を追加すること
@@ -605,6 +619,115 @@ async def save_file_outputs(reply, timestamp):
     return saved
 
 
+async def handle_done_ceo(guild, sender_key, summary):
+    """[DONE:CEO:] → 秘書チャンネルにCEO向け完了通知を投稿"""
+    sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
+    secretary_ch = None
+    for ch in guild.text_channels:
+        if "秘書" in ch.name or "secretary" in ch.name.lower():
+            secretary_ch = ch
+            break
+    if not secretary_ch:
+        secretary_ch = discord.utils.get(guild.text_channels, name="agent-chat")
+    if not secretary_ch:
+        return
+    msg = f"[{sender_name}より] {summary.strip()}"
+    webhook_url = AGENT_WEBHOOKS.get("secretary")
+    if webhook_url:
+        await webhook_send(webhook_url, "secretary", msg)
+    else:
+        await secretary_ch.send(msg)
+    ts = datetime.utcnow()
+    await append_agent_memory("secretary", f"[CEO提出/{sender_name}] {summary[:150]}", ts)
+    update_agent_prompt("secretary")
+
+
+async def handle_next_task(guild, sender_key, target_key, task, depth=0):
+    """[NEXT:agent:] → 対象エージェントがSonnetで自律実行。完了後も連鎖する（最大5段）"""
+    if depth >= 5:
+        return
+    agent_chat = discord.utils.get(guild.text_channels, name="agent-chat")
+    if not agent_chat:
+        return
+    target_agent = AGENTS.get(target_key)
+    sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
+    if not target_agent:
+        return
+    target_name = target_agent["name"]
+    task = task.strip()
+
+    if WEBHOOK_AGENT_CHAT:
+        await webhook_send(WEBHOOK_AGENT_CHAT, sender_key, f"[{target_name}へ引き渡し]\n{task[:100]}")
+
+    async with agent_chat.typing():
+        try:
+            # メモリ内のファイルパスを自動注入
+            folder = KEY_TO_FOLDER.get(target_key, target_key)
+            memory_path = os.path.join(BASE_DIR, "agents", folder, "memory.md")
+            file_context = ""
+            if os.path.exists(memory_path):
+                with open(memory_path, "r", encoding="utf-8") as f:
+                    mem_text = f.read()
+                for path in re.findall(r'projects/[\w/.\-_]+\.(?:md|csv|txt)', mem_text):
+                    local = os.path.join(BASE_DIR, path.replace("/", os.sep))
+                    if os.path.exists(local):
+                        try:
+                            with open(local, "r", encoding="utf-8") as f:
+                                file_context += f"\n\n[参照ファイル: {path}]\n{f.read()[:2000]}"
+                        except Exception:
+                            pass
+
+            prompt_content = (
+                f"【{sender_name}からの引き渡しタスク】\n{task}"
+                + (f"\n\n{file_context}" if file_context else "")
+                + "\n\nこのタスクを実行してください。完了後は[NEXT:]か[DONE:CEO:]で必ず次に渡してください。"
+            )
+
+            resp = claude.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4096,
+                system=target_agent["prompt"],
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+                messages=[{"role": "user", "content": prompt_content}],
+            )
+            raw = "\n".join(b.text for b in resp.content if hasattr(b, "text"))
+            ts = datetime.utcnow()
+
+            # ファイル保存
+            saved_files = await save_file_outputs(raw, ts)
+
+            # SAVE: 処理
+            for sc in re.findall(r'\[SAVE:\s*(.+?)\]', raw, re.DOTALL):
+                await append_agent_memory(target_key, sc.strip(), ts)
+
+            # agent-chatに結果投稿
+            clean = re.sub(r'\[FILE:.+?\]\n?.*?\[/FILE\]', '', raw, flags=re.DOTALL)
+            clean = re.sub(r'\[(?:SAVE|MSG|NEXT|DONE|SHARE):.+?\]', '', clean, flags=re.DOTALL).strip()
+            clean = strip_emoji(clean)
+            if WEBHOOK_AGENT_CHAT:
+                report = clean
+                if saved_files:
+                    report += "\n\n保存: " + ", ".join(saved_files)
+                await webhook_send(WEBHOOK_AGENT_CHAT, target_key, report)
+
+            await append_agent_memory(target_key, f"[{sender_name}からのタスク完了] {task[:80]}", ts)
+            await append_agent_memory("secretary", f"[{target_name}がタスク完了] {task[:80]}", ts)
+            update_agent_prompt(target_key)
+            update_agent_prompt("secretary")
+
+            # 連鎖: NEXT: → 次のエージェントへ
+            for nk, nt in re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', raw, re.DOTALL):
+                if AGENTS.get(nk.lower()):
+                    await handle_next_task(guild, target_key, nk.lower(), nt, depth + 1)
+
+            # 連鎖: DONE:CEO: → CEOへ提出
+            for ds in re.findall(r'\[DONE:CEO:\s*(.+?)\]', raw, re.DOTALL):
+                await handle_done_ceo(guild, target_key, ds)
+
+        except Exception as e:
+            print(f"handle_next_task エラー ({target_key}): {e}")
+
+
 async def handle_agent_messaging(guild, sender_key, reply):
     """[SHARE:] と [MSG:agent:] マーカーを処理してエージェント間の会話を#agent-chatで展開"""
     agent_chat = discord.utils.get(guild.text_channels, name="agent-chat")
@@ -613,6 +736,15 @@ async def handle_agent_messaging(guild, sender_key, reply):
 
     sender_name = AGENTS.get(sender_key, {}).get("name", sender_key)
     exchanges = []  # (送信先名, 内容, 返答) を記録
+
+    # [DONE:CEO:]
+    for ds in re.findall(r'\[DONE:CEO:\s*(.+?)\]', reply, re.DOTALL):
+        await handle_done_ceo(guild, sender_key, ds)
+
+    # [NEXT:agent:] → 自律実行
+    for nk, nt in re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', reply, re.DOTALL):
+        if AGENTS.get(nk.lower()):
+            await handle_next_task(guild, sender_key, nk.lower(), nt)
 
     # [SHARE: 内容] → #agent-chat に全体投稿
     share_matches = re.findall(r'\[SHARE:\s*(.+?)\]', reply, re.DOTALL)
@@ -984,6 +1116,55 @@ async def nightly_log_push():
     await push_daily_logs()
 
 
+# 30分ごとにPMがブロッカーを検知して自動再実行
+@tasks.loop(minutes=30)
+async def pm_periodic_check():
+    """グレンが各エージェントのメモリを読んでブロッカーを検知し、NEXT:で自動再実行する"""
+    agent_chat = discord.utils.get(bot.get_all_channels(), name="agent-chat")
+    if not agent_chat or not AGENTS.get("pm"):
+        return
+    try:
+        # 各エージェントのメモリ末尾を収集
+        memories = {}
+        key_to_folder = {"sales": "sales", "marketing": "marketing", "dev": "development"}
+        for ak, folder in key_to_folder.items():
+            mem_path = os.path.join(BASE_DIR, "agents", folder, "memory.md")
+            if os.path.exists(mem_path):
+                with open(mem_path, "r", encoding="utf-8") as f:
+                    memories[ak] = f.read()[-1200:]
+
+        mem_summary = "\n".join(f"[{k}メモリ]\n{v}" for k, v in memories.items())
+        check_prompt = (
+            f"あなたはPM（グレン）として、各エージェントの現状を確認している。\n\n"
+            f"【各エージェントのメモリ末尾】\n{mem_summary}\n\n"
+            f"ブロッカー（待ち状態・未完了のタスク）を特定してください。\n"
+            f"ブロッカーがあれば [NEXT:agent: 具体的なタスク内容] で再起動してください（最大2件）。\n"
+            f"ブロッカーがなければ何も出力しないでください。"
+        )
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=AGENTS["pm"]["prompt"],
+            messages=[{"role": "user", "content": check_prompt}],
+        )
+        raw = resp.content[0].text
+
+        # NEXT: があれば実行
+        next_matches = re.findall(r'\[NEXT:(\w+):\s*(.+?)\]', raw, re.DOTALL)
+        if next_matches:
+            clean = re.sub(r'\[.+?\]', '', raw, flags=re.DOTALL).strip()
+            clean = strip_emoji(clean)
+            if clean and WEBHOOK_AGENT_CHAT:
+                await webhook_send(WEBHOOK_AGENT_CHAT, "pm", f"[定期チェック]\n{clean}")
+            for nk, nt in next_matches:
+                if AGENTS.get(nk.lower()):
+                    await handle_next_task(agent_chat.guild, "pm", nk.lower(), nt)
+        else:
+            print("pm_periodic_check: ブロッカーなし")
+    except Exception as e:
+        print(f"pm_periodic_check エラー: {e}")
+
+
 @bot.event
 async def on_ready():
     load_all_agents()
@@ -991,6 +1172,8 @@ async def on_ready():
         morning_routine.start()
     if not nightly_log_push.is_running():
         nightly_log_push.start()
+    if not pm_periodic_check.is_running():
+        pm_periodic_check.start()
     print(f"Bot起動完了: {bot.user}")
 
 
@@ -1164,7 +1347,7 @@ async def on_message(message):
                     await handle_delegation(message.guild, reply)
 
                 # エージェント間メッセージング（全エージェント共通）
-                if message.guild and ('[SHARE:' in reply or '[MSG:' in reply):
+                if message.guild and any(m in reply for m in ('[SHARE:', '[MSG:', '[NEXT:', '[DONE:')):
                     await handle_agent_messaging(message.guild, agent_key, reply)
 
             except Exception as e:
