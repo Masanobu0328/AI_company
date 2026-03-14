@@ -1391,8 +1391,7 @@ async def on_message(message):
 
                 # 各種マーカーを除いてCEOに表示
                 clean_reply = re.sub(r'\[FILE:.+?\]\n?.*?\[/FILE\]', '', reply, flags=re.DOTALL)
-                clean_reply = re.sub(r'\[SAVE:.+?\]', '', clean_reply, flags=re.DOTALL)
-                clean_reply = re.sub(r'\[→\w+:.+?\]', '', clean_reply, flags=re.DOTALL).strip()
+                clean_reply = re.sub(r'\[(?:SAVE|NEXT|DONE|MSG|SHARE|→\w+):.+?\]', '', clean_reply, flags=re.DOTALL).strip()
 
                 # 履歴に追加（Layer2: 最大10ターン保持）
                 history.append({"role": "assistant", "content": clean_reply})
