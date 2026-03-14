@@ -987,8 +987,10 @@ async def nightly_log_push():
 @bot.event
 async def on_ready():
     load_all_agents()
-    morning_routine.start()
-    nightly_log_push.start()
+    if not morning_routine.is_running():
+        morning_routine.start()
+    if not nightly_log_push.is_running():
+        nightly_log_push.start()
     print(f"Bot起動完了: {bot.user}")
 
 
