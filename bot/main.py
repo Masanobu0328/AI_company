@@ -1087,6 +1087,16 @@ async def on_message(message):
     # 重複処理防止
     if message.id in processed_message_ids:
         return
+
+    # CEOが直接 [NEXT:] / [DONE:] / [MSG:] を書いた場合、即実行
+    raw_content = message.content.strip()
+    if message.guild and any(m in raw_content for m in ('[NEXT:', '[DONE:', '[MSG:', '[SHARE:')):
+        await handle_agent_messaging(message.guild, "secretary", raw_content)
+        # マーカーのみのメッセージなら返信不要
+        clean_check = re.sub(r'\[(?:NEXT|DONE|MSG|SHARE):.+?\]', '', raw_content, flags=re.DOTALL).strip()
+        if not clean_check:
+            processed_message_ids.add(message.id)
+            return
     processed_message_ids.add(message.id)
     if len(processed_message_ids) > 500:  # メモリ肥大防止
         processed_message_ids.clear()
