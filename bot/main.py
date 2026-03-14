@@ -771,6 +771,66 @@ async def handle_delegation(guild, pm_response):
                 print(f"委譲エラー: {e}")
 
 
+NAME_TO_AGENT_KEY = {
+    "グラント": "sales", "営業": "sales",
+    "森岡": "marketing", "マーケ": "marketing",
+    "グレン": "pm", "PM": "pm",
+    "ウォズ": "dev", "ウォズニアック": "dev", "開発": "dev",
+    "菅": "secretary", "秘書": "secretary",
+}
+
+DELEGATION_TRIGGERS = [
+    "に指示", "にやらせて", "に頼んで", "にお願いして", "に依頼",
+    "にやってもらって", "に作らせて", "に分析させて", "に調査させて",
+    "を動かして", "を動かせて", "が動いてほしい",
+]
+
+async def detect_and_run_delegation(guild, content):
+    """自然言語の指示（〜にやらせて）を検出してNEXTを実行。実行したらTrueを返す"""
+    # 名前 + 指示トリガーが両方含まれているか簡易チェック
+    has_name = any(name in content for name in NAME_TO_AGENT_KEY)
+    has_trigger = any(t in content for t in DELEGATION_TRIGGERS)
+    if not (has_name and has_trigger):
+        return False
+
+    # Haikuで「誰に・何を」を抽出
+    parse_prompt = (
+        f"以下のCEOの発言から、指示対象エージェントとタスク内容を抽出してください。\n"
+        f"エージェント名は次のいずれか: sales, marketing, pm, dev, secretary\n"
+        f"回答は必ずJSON形式で: {{\"agent\": \"sales\", \"task\": \"タスク内容\"}}\n"
+        f"複数いる場合は配列: [{{\"agent\": \"sales\", \"task\": \"...\"}}, ...]\n"
+        f"指示がない場合は: null\n\n"
+        f"発言: {content}"
+    )
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content": parse_prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        # JSONを抽出
+        json_match = re.search(r'(\[.+\]|\{.+\})', raw, re.DOTALL)
+        if not json_match:
+            return False
+        parsed = json.loads(json_match.group(1))
+        if parsed is None:
+            return False
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        executed = False
+        for item in parsed:
+            ak = item.get("agent", "").lower()
+            task = item.get("task", "").strip()
+            if ak and task and AGENTS.get(ak):
+                await handle_next_task(guild, "secretary", ak, task)
+                executed = True
+        return executed
+    except Exception as e:
+        print(f"delegation parse error: {e}")
+        return False
+
+
 def route_message_to_agents(content):
     """メッセージ内容から担当エージェントをキーワードで判定"""
     routing_hints = {
@@ -960,6 +1020,10 @@ async def on_message(message):
 
     channel_name = message.channel.name if hasattr(message.channel, "name") else ""
     content = message.content.strip()
+
+    # CEOの自然言語指示を検出（「グラントにやらせて」など）
+    if message.guild and await detect_and_run_delegation(message.guild, content):
+        return  # 指示実行済みなので通常処理をスキップ
 
     # 全体チャンネル（agent-chat含む）: CEOが直接書いたら全エージェントが応答
     if is_all_hands_channel(channel_name):
