@@ -137,10 +137,7 @@ KEY_TO_FOLDER = {
 def build_prompt(key, base, learning, is_secretary=False, is_pm=False, is_marketing=False, is_sales=False, is_dev=False):
     """エージェントのシステムプロンプトを生成する"""
     agent_name = AGENT_KEYS.get(key, key)
-    tone = (
-        "丁寧な敬語で話すこと。" if is_secretary
-        else "敬語は使わない。カジュアルな口調で話す。「〜だ」「〜だね」「〜しよう」「〜かな」など自然な話し言葉で。"
-    )
+    tone = "丁寧な敬語で話すこと。" if is_secretary else ""
     secretary_rule = """
 ## キャラクター設定（菅義偉）
 - **基本アルゴリズム**: 「実行と鉄の意志」を重んじる。寡黙な実行者として、事実を淡々と積み上げ、実務と結果に徹底的にこだわる。
@@ -203,7 +200,7 @@ def build_prompt(key, base, learning, is_secretary=False, is_pm=False, is_market
 {sales_rule}
 {dev_rule}
 ## 口調・スタイル（絶対厳守）
-- {tone}
+{f"- {tone}" if tone else ""}
 - 絵文字は絶対に使わない。1個も使わない。例：❌ 🔴✅📋💾🔀📊😊👍🎯 これらは全て禁止
 - ━ ─ │ ★ ● ◆ ■ などの装飾文字も使わない
 - 通常会話は5行以内。「了解」だけで終わらず、意見・提案・次のアクションを必ず加える
