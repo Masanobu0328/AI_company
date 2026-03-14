@@ -1110,6 +1110,68 @@ async def morning_routine():
     await run_sns_drafts()
 
 
+# 朝9時・夜21時（JST）= UTC 0:00・12:00 に秘書が状況報告
+@tasks.loop(time=[dtime(0, 5), dtime(12, 0)])
+async def secretary_daily_report():
+    """菅が全エージェントに進捗確認して秘書チャンネルにCEO向け報告を投稿"""
+    secretary_agent = AGENTS.get("secretary")
+    if not secretary_agent:
+        return
+
+    # 各エージェントのメモリ末尾を収集
+    reports = {}
+    key_to_folder = {
+        "sales": ("sales", "グラント"),
+        "marketing": ("marketing", "森岡"),
+        "dev": ("development", "ウォズニアック"),
+        "pm": ("pm", "グレン"),
+    }
+    for ak, (folder, name) in key_to_folder.items():
+        agent = AGENTS.get(ak)
+        if not agent:
+            continue
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=120,
+                system=agent["prompt"],
+                messages=[{"role": "user", "content": "菅（秘書）からの確認です。現在の作業状況を2行以内で報告してください。"}],
+            )
+            reply = strip_emoji(re.sub(r'\[.+?\]', '', resp.content[0].text, flags=re.DOTALL).strip())
+            reports[name] = reply
+        except Exception as e:
+            reports[name] = f"（取得エラー）"
+
+    # 秘書が要約してCEO向け報告文を作成
+    report_text = "\n".join(f"【{name}】{text}" for name, text in reports.items())
+    time_label = "朝" if datetime.utcnow().hour < 6 else "夜"
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=250,
+            system=secretary_agent["prompt"],
+            messages=[{"role": "user", "content": f"以下の各メンバーの報告をCEOへの{time_label}の状況報告としてまとめてください。簡潔に。\n\n{report_text}"}],
+        )
+        summary = strip_emoji(re.sub(r'\[.+?\]', '', resp.content[0].text, flags=re.DOTALL).strip())
+    except Exception:
+        summary = report_text
+
+    # 秘書チャンネルに投稿
+    for ch in bot.get_all_channels():
+        if hasattr(ch, "name") and ("秘書" in ch.name or "secretary" in ch.name.lower()):
+            webhook_url = AGENT_WEBHOOKS.get("secretary")
+            if webhook_url:
+                await webhook_send(webhook_url, "secretary", summary)
+            else:
+                await ch.send(summary)
+            break
+
+    # 秘書のメモリにも保存
+    ts = datetime.utcnow()
+    await append_agent_memory("secretary", f"[{time_label}の定期報告]\n{report_text[:300]}", ts)
+    update_agent_prompt("secretary")
+
+
 # 毎日23:59（JST）= UTC 14:59 にログをまとめてpush
 @tasks.loop(time=dtime(14, 59))
 async def nightly_log_push():
@@ -1174,6 +1236,8 @@ async def on_ready():
         nightly_log_push.start()
     if not pm_periodic_check.is_running():
         pm_periodic_check.start()
+    if not secretary_daily_report.is_running():
+        secretary_daily_report.start()
     print(f"Bot起動完了: {bot.user}")
 
 
